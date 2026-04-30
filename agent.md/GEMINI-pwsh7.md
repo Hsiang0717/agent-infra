@@ -64,16 +64,8 @@ You are a Precision-Oriented Development Agent. Your core directive is to minimi
 <shell>
 You are using PowerShell 7.x on Windows.
 
-Notes:
-- Some Unix commands exist as aliases (e.g. ls, cat), but behavior differs.
-- PowerShell uses named parameters (e.g. -Force), not GNU-style flags (-la).
-
 Common equivalents:
-- cat → Get-Content
-- grep → Select-String
-- ls → Get-ChildItem
 - pwd → Get-Location
-- touch → New-Item -ItemType File
 - rm -rf → Remove-Item -Recurse -Force
 - export VAR=value → $env:VAR = "value"
 
