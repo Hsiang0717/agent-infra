@@ -16,4 +16,5 @@
 
 ## 🚀 快速開始
 
+Windows 用戶建議
 請參考 [docs/pwsh7-setup.md](./docs/pwsh7-setup.md) 進行初始環境配置。
