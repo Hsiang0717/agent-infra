@@ -2,7 +2,13 @@
   "name": "geminicli-extension",
   "displayName": "Gemini CLI",
   "description": "Quickly open Gemini CLI in a native terminal.",
-  "version": "0.0.1",
+  "version": "0.0.2",
+  "publisher": "Hsiang0717",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Hsiang0717/skill-development"
+  },
+  "license": "MIT",
   "engines": {
     "vscode": "^1.70.0"
   },
