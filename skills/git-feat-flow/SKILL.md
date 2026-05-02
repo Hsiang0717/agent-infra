@@ -15,10 +15,12 @@ description: 專為 Feature Branch 設計的 AI 自適應 Git 工作流。支援
 2. **AI 診斷**：Agent 將元數據交由 LLM 分析，產出專案專屬的 `.git-feat-flow.md`。
 3. **建立規約**：此檔案包含 YAML Frontmatter（機器讀取）與 Markdown 說明（人類閱讀），定義了目錄與 `scope` 的映射關係。
 
-### 2. 智慧型分批提交 (AI Granular Commits)
-1. **讀取規約**：自動載入 `.git-feat-flow.md` 中的規則。
-2. **語意分析**：若發生混合變更，Agent 會利用 LLM 閱讀 `git diff`，判斷變更的真實意圖（意圖 > 路徑）。
-3. **批次建議**：生成符合專案規約的 Conventional Commits。
+### 2. 分支預檢與智慧分批提交 (Branching Guard & Granular Commits)
+1. **分支預檢 (Branching Guard)**：在執行任何提交前，Agent 必須檢查當前分支。**禁止直接提交至 `main` 或 `master` 分支。**
+2. **自動導流**：若偵測到當前在主分支，應主動建議或執行 `git checkout -b feat/<scope>-<description>`。
+3. **讀取規約**：自動載入 `.git-feat-flow.md` 中的規則。
+4. **語意分析**：若發生混合變更，Agent 會利用 LLM 閱讀 `git diff`，判斷變更的真實意圖（意圖 > 路徑）。
+5. **批次建議**：生成符合專案規約的 Conventional Commits。
 
 ### 3. 安全同步 (Safe Rebase)
 1. **環境預檢**：執行 `scripts/rebase_helper.js` 確保工作區安全。
