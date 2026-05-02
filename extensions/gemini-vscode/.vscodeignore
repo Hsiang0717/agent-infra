@@ -1,0 +1,10 @@
+.vscode/**
+.vscode-test/**
+out/test/**
+src/**
+ATO_PLAN/**
+tsconfig.json
+pnpm-lock.yaml
+vsc-extension-quickstart.md
+.gitignore
+.vscodeignore
