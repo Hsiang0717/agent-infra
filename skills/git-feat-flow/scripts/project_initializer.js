@@ -24,10 +24,16 @@ function gatherProjectMetadata() {
     const criticalFiles = ['package.json', 'go.mod', 'requirements.txt', 'Cargo.toml', 'GEMINI.md', 'README.md', 'pyproject.toml'];
     metadata.keyFiles = files.filter(f => criticalFiles.includes(f));
 
-    if (metadata.keyFiles.includes('package.json')) metadata.projectType = 'Node.js';
-    else if (metadata.keyFiles.includes('go.mod')) metadata.projectType = 'Go';
-    else if (metadata.keyFiles.includes('requirements.txt') || metadata.keyFiles.includes('pyproject.toml')) metadata.projectType = 'Python';
-    else if (metadata.keyFiles.includes('Cargo.toml')) metadata.projectType = 'Rust';
+    // 3. Detect Remotes and collaborative environment
+    let remotes = '';
+    try {
+      const { execSync } = require('child_process');
+      remotes = execSync('git remote -v', { encoding: 'utf8' });
+    } catch (e) {}
+    
+    metadata.remotes = remotes;
+    metadata.isCollaborative = remotes.includes('github.com') || remotes.includes('gitlab.com') || remotes.includes('bitbucket.org');
+    metadata.suggestedMode = metadata.isCollaborative ? 'collaborative' : 'local';
 
     console.log(JSON.stringify(metadata, null, 2));
   } catch (error) {
