@@ -2,23 +2,21 @@ const { execSync } = require('child_process');
 
 function checkPreRebase() {
   try {
-    // 1. Check branch
     const branch = execSync('git rev-parse --abbrev-ref HEAD', { encoding: 'utf8' }).trim();
     if (branch === 'main' || branch === 'master') {
-      console.log('Error: You are on the main branch. Please switch to a feature branch.');
+      console.error(JSON.stringify({ error: 'Cannot rebase while on main branch.' }));
       process.exit(1);
     }
 
-    // 2. Check dirty status
     const status = execSync('git status --porcelain', { encoding: 'utf8' }).trim();
     if (status !== '') {
-      console.log('Error: Your working directory is dirty. Please stash or commit your changes first.');
+      console.error(JSON.stringify({ error: 'Working directory is dirty. Please stash or commit changes.' }));
       process.exit(1);
     }
 
-    console.log('Pre-rebase check passed.');
+    console.log(JSON.stringify({ status: 'ready' }));
   } catch (error) {
-    console.error('Git error:', error.message);
+    console.error(JSON.stringify({ error: error.message }));
     process.exit(1);
   }
 }
