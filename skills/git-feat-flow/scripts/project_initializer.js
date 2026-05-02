@@ -1,36 +1,37 @@
-const { execSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 
 function gatherProjectMetadata() {
   const metadata = {
-    structure: '',
-    keyFiles: {},
+    structure: [],
+    keyFiles: [],
     projectType: 'unknown'
   };
 
   try {
-    // 1. Get directory structure (Top level + 1 deep)
-    metadata.structure = execSync('dir /B /A:D', { encoding: 'utf8' })
-      .split('\n')
-      .filter(line => line.trim() !== '' && !line.includes('.git') && !line.includes('node_modules'))
-      .join('\n');
+    const rootDir = process.cwd();
+    
+    // 1. Get directory structure (Top level)
+    const files = fs.readdirSync(rootDir);
+    metadata.structure = files.filter(f => {
+      try {
+        const stats = fs.statSync(path.join(rootDir, f));
+        return stats.isDirectory() && !f.startsWith('.') && f !== 'node_modules';
+      } catch (e) { return false; }
+    });
 
     // 2. Identify key files
-    const criticalFiles = ['package.json', 'go.mod', 'requirements.txt', 'Cargo.toml', 'GEMINI.md', 'README.md'];
-    criticalFiles.forEach(file => {
-      if (fs.existsSync(file)) {
-        metadata.keyFiles[file] = true;
-        if (file === 'package.json') metadata.projectType = 'Node.js';
-        if (file === 'go.mod') metadata.projectType = 'Go';
-        if (file === 'requirements.txt') metadata.projectType = 'Python';
-        if (file === 'Cargo.toml') metadata.projectType = 'Rust';
-      }
-    });
+    const criticalFiles = ['package.json', 'go.mod', 'requirements.txt', 'Cargo.toml', 'GEMINI.md', 'README.md', 'pyproject.toml'];
+    metadata.keyFiles = files.filter(f => criticalFiles.includes(f));
+
+    if (metadata.keyFiles.includes('package.json')) metadata.projectType = 'Node.js';
+    else if (metadata.keyFiles.includes('go.mod')) metadata.projectType = 'Go';
+    else if (metadata.keyFiles.includes('requirements.txt') || metadata.keyFiles.includes('pyproject.toml')) metadata.projectType = 'Python';
+    else if (metadata.keyFiles.includes('Cargo.toml')) metadata.projectType = 'Rust';
 
     console.log(JSON.stringify(metadata, null, 2));
   } catch (error) {
-    console.error('Error gathering metadata:', error.message);
+    console.error(JSON.stringify({ error: error.message }));
     process.exit(1);
   }
 }

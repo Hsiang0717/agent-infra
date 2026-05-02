@@ -10,28 +10,23 @@ description: 專為 Feature Branch 設計的 AI 自適應 Git 工作流。支援
 ## 核心工作流
 
 ### 1. 專案適應 (AI Project Adaptation)
-當您在一個新專案中啟用此 Skill，或需要更新規約時：
-1. **執行分析**：執行 `scripts/project_initializer.js` 收集專案元數據。
-2. **AI 診斷**：Agent 將元數據交由 LLM 分析，產出專案專屬的 `.git-feat-flow.md`。
-3. **建立規約**：此檔案包含 YAML Frontmatter（機器讀取）與 Markdown 說明（人類閱讀），定義了目錄與 `scope` 的映射關係。
+1. **Pilot (AI) 指令**：呼叫 `scripts/project_initializer.js`。
+2. **Executor (Script) 執行**：掃描目錄結構與關鍵檔案，輸出 JSON 格式的專案元數據。
+3. **Pilot (AI) 推理**：讀取 JSON，判斷專案類型與合適的 Scope 分類，生成 `.git-feat-flow.md`。
 
 ### 2. 分支預檢與智慧分批提交 (Branching Guard & Granular Commits)
-1. **分支預檢 (Branching Guard)**：在執行任何提交前，Agent 必須檢查當前分支。**禁止直接提交至 `main` 或 `master` 分支。**
-2. **自動導流**：若偵測到當前在主分支，應主動建議或執行 `git checkout -b feat/<scope>-<description>`。
-3. **讀取規約**：自動載入 `.git-feat-flow.md` 中的規則。
-4. **語意分析**：若發生混合變更，Agent 會利用 LLM 閱讀 `git diff`，判斷變更的真實意圖（意圖 > 路徑）。
-5. **批次建議**：生成符合專案規約的 Conventional Commits。
+1. **Pilot (AI) 預檢**：呼叫 `git branch --show-current`，若在 `main`/`master` 則執行自動導流。
+2. **Executor (Script) 分類**：執行 `scripts/git_analyzer.js`，根據規約將變更檔案自動分組。
+3. **Pilot (AI) 語意分析**：閱讀 `git diff`，結合分組結果，為每一組生成精準的 Conventional Commits。
 
 ### 3. 安全同步 (Safe Rebase)
-1. **環境預檢**：執行 `scripts/rebase_helper.js` 確保工作區安全。
-2. **衝突建議**：發生衝突時，Agent 分析衝突區塊並給出語意化的合併建議。
+1. **Executor (Script) 檢查**：執行 `scripts/rebase_helper.js` 確保工作區乾淨且不在主分支。
+2. **Pilot (AI) 同步**：執行 `git rebase`，若發生衝突，由 AI 分析衝突區塊並給出合併建議。
 
 ### 4. 任務完成清理 (Post-Merge Cleanup)
-當您的 Feature Branch 已在遠端（GitHub/GitLab）合併後，執行此流程：
-1. **自動歸位**：切換回 `main` 分支。
-2. **同步更新**：從遠端 `pull` 最新代碼。
-3. **淨化環境**：執行 `fetch --prune` 移除過期的遠端追蹤分支。
-4. **安全刪除**：嘗試刪除已合併的本地分支，確保工作區不留殘餘。
+1. **Pilot (AI) 確認**：確認遠端已合併。
+2. **Executor (Script) 執行**：直接呼叫 `scripts/cleanup_helper.js` 執行標準的「歸位、同步、淨化、刪除」流程。
+
 
 ## 指令參考
 
