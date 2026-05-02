@@ -1,42 +1,44 @@
 ---
 name: git-feat-flow
-description: 專為 Feature Branch 設計的 AI 自適應 Git 工作流。支援透過 LLM 自動分析專案結構並生成客製化規約 (.git-feat-flow.md)，實現精準的分批提交與 Rebase 管理。
+description: AI-adaptive Git workflow for Feature Branches. Supports automatic project analysis, custom rule generation (.git-feat-flow.md), granular commits, and safe rebase management.
 ---
 
 # Git Feature Flow (AI-Powered)
 
-本 Skill 透過 AI 語意分析，自動適應任何專案結構，將 Agent 轉化為具備專案上下文知識的 Git 顧問。
+This skill utilizes AI semantic analysis to adapt to any project structure, transforming the Agent into a Git consultant with deep project context.
 
-## 核心工作流
+## Core Workflow
 
-### 1. 專案適應 (AI Project Adaptation)
-1. **Pilot (AI) 指令**：呼叫 `scripts/project_initializer.js`。
-2. **Executor (Script) 執行**：掃描目錄結構與關鍵檔案，輸出 JSON 格式的專案元數據。
-3. **Pilot (AI) 推理**：讀取 JSON，判斷專案類型與合適的 Scope 分類，生成 `.git-feat-flow.md`。
+### 1. AI Project Adaptation
+1. **Pilot (AI) Command**: Invoke `scripts/project_initializer.js`.
+2. **Executor (Script) Execution**: Scans directory structure, critical files, and **Remote Status**. Outputs project metadata in JSON format.
+3. **Pilot (AI) Reasoning**: Reads JSON to determine project type, appropriate Scope categories, and **Workflow Mode (local/collaborative)**. Generates `.git-feat-flow.md`.
 
-### 2. 分支預檢與智慧分批提交 (Branching Guard & Granular Commits)
-1. **Pilot (AI) 預檢**：呼叫 `git branch --show-current`，若在 `main`/`master` 則執行自動導流。
-2. **Executor (Script) 分類**：執行 `scripts/git_analyzer.js`，根據規約將變更檔案自動分組。
-3. **Pilot (AI) 語意分析**：閱讀 `git diff`，結合分組結果，為每一組生成精準的 Conventional Commits。
+### 2. Branching Guard & Granular Commits
+1. **Pilot (AI) Pre-check**: Invoke `git branch --show-current`. If on `main`/`master`, perform automatic branch diversion (create feature branch).
+2. **Executor (Script) Classification**: Invoke `scripts/git_analyzer.js` to automatically group changed files based on project rules.
+3. **Pilot (AI) Semantic Analysis**: Analyze `git diff` and grouping results to generate precise Conventional Commits for each group.
+4. **Gatekeeper (AI) Protocol**: If `workflow_mode` is `collaborative`, **HALT all automated actions** after `git push`. Instruct the user to initiate a Merge Request (MR/PR). **DO NOT** merge into protected branches locally.
 
-### 3. 安全同步 (Safe Rebase)
-1. **Executor (Script) 檢查**：執行 `scripts/rebase_helper.js` 確保工作區乾淨且不在主分支。
-2. **Pilot (AI) 同步**：執行 `git rebase`，若發生衝突，由 AI 分析衝突區塊並給出合併建議。
+### 3. Safe Synchronization (Safe Rebase)
+1. **Executor (Script) Check**: Invoke `scripts/rebase_helper.js` to ensure the workspace is clean and not on the main branch.
+2. **Pilot (AI) Sync**: Execute `git rebase`. If conflicts occur, AI analyzes conflict blocks and provides resolution suggestions.
 
-### 4. 任務完成清理 (Post-Merge Cleanup)
-1. **Pilot (AI) 確認**：確認遠端已合併。
-2. **Executor (Script) 執行**：直接呼叫 `scripts/cleanup_helper.js` 執行標準的「歸位、同步、淨化、刪除」流程。
+### 4. Post-Merge Cleanup
+1. **Pilot (AI) Verification**: Before cleanup, verify that the remote branch has been successfully merged (via user confirmation or API check).
+2. **Executor (Script) Execution**: Invoke `scripts/cleanup_helper.js` to switch back to the main branch, sync with remote, and safely delete the local feature branch.
 
 
-## 指令參考
+## Command Reference
 
-- **"分析專案結構並設定 git-feat-flow"**：啟動 AI 適應流程，生成或更新 `.git-feat-flow.md`。
-- **"幫我分批提交此次變更"**：基於規約與 AI 判斷進行智慧提交。
-- **"同步變更並處理衝突"**：執行 Rebase 並開啟 AI 衝突輔助模式。
-- **"任務完成，幫我清理分支"**：啟動歸位與安全刪除流程。
+- **"Analyze project and setup git-feat-flow"**: Start the adaptation process, detect environment, and set `workflow_mode`.
+- **"Help me commit these changes in batches"**: Perform granular commits. In collaborative mode, automatically enter a waiting state after Pushing.
+- **"Sync changes and handle conflicts"**: Execute Rebase with AI conflict assistance.
+- **"Task complete, help me cleanup the branch"**: Execute only AFTER confirmation of merge to ensure local/remote synchronization.
 
-## 規則檔：.git-feat-flow.md
-此檔案位於專案根目錄，包含：
-- `mappings`: 定義特定路徑對應的 `scope` 與 `type`。
-- `global_rules`: 定義副檔名或特定檔案的歸類邏輯。
-- `ai_adaptation`: 是否允許 LLM 在執行時根據內容進行動態微調。
+## Configuration: .git-feat-flow.md
+Located in the project root, containing:
+- `workflow_mode`: `local` (personal) or `collaborative` (team-based, requires MR).
+- `mappings`: Path-to-Scope/Type mappings.
+- `global_rules`: Categorization logic based on extensions or specific files.
+- `ai_adaptation`: Whether to allow LLM dynamic adjustments during execution.
