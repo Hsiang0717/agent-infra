@@ -18,7 +18,10 @@ This skill utilizes AI semantic analysis to adapt to any project structure, tran
 1. **Pilot (AI) Pre-check**: Invoke `git branch --show-current`. If on `main`/`master`, perform automatic branch diversion (create feature branch).
 2. **Executor (Script) Classification**: Invoke `scripts/git_analyzer.js` to automatically group changed files based on project rules.
 3. **Pilot (AI) Semantic Analysis**: Analyze `git diff` and grouping results to generate precise Conventional Commits for each group.
-4. **Gatekeeper (AI) Protocol**: If `workflow_mode` is `collaborative`, **HALT all automated actions** after `git push`. Instruct the user to initiate a Merge Request (MR/PR). **DO NOT** merge into protected branches locally.
+4. **Gatekeeper (AI) Protocol**: 
+   - If `workflow_mode` is `collaborative`, execute `scripts/push_handler.js`.
+   - **HALT all automated actions** after the script outputs the PR link and Gatekeeper warning.
+   - Instruct the user to initiate a Merge Request (MR/PR). **DO NOT** merge into protected branches locally.
 
 ### 3. Safe Synchronization (Safe Rebase)
 1. **Executor (Script) Check**: Invoke `scripts/rebase_helper.js` to ensure the workspace is clean and not on the main branch.
@@ -26,15 +29,15 @@ This skill utilizes AI semantic analysis to adapt to any project structure, tran
 
 ### 4. Post-Merge Cleanup
 1. **Pilot (AI) Verification**: Before cleanup, verify that the remote branch has been successfully merged (via user confirmation or API check).
-2. **Executor (Script) Execution**: Invoke `scripts/cleanup_helper.js` to switch back to the main branch, sync with remote, and safely delete the local feature branch.
+2. **Executor (Script) Execution**: Invoke `scripts/cleanup_helper.js`. This script will now automatically detect the default branch, verify merge status on remote, and safely synchronize the workspace.
 
 
 ## Command Reference
 
 - **"Analyze project and setup git-feat-flow"**: Start the adaptation process, detect environment, and set `workflow_mode`.
-- **"Help me commit these changes in batches"**: Perform granular commits. In collaborative mode, automatically enter a waiting state after Pushing.
+- **"Help me commit these changes in batches"**: Perform granular commits. In collaborative mode, use `push_handler.js` to push and then enter a waiting state.
 - **"Sync changes and handle conflicts"**: Execute Rebase with AI conflict assistance.
-- **"Task complete, help me cleanup the branch"**: Execute only AFTER confirmation of merge to ensure local/remote synchronization.
+- **"Task complete, help me cleanup the branch"**: Execute `cleanup_helper.js` AFTER confirmation of merge to ensure local/remote synchronization.
 
 ## Configuration: .git-feat-flow.md
 Located in the project root, containing:
