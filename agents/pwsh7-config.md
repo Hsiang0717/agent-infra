@@ -66,11 +66,27 @@ You are using PowerShell 7.x on Windows.
 
 Common equivalents:
 - pwd → Get-Location
+- ls → Get-ChildItem
+- cat → Get-Content
+- ps → Get-Process
+- cp → Copy-Item
+- mv → Move-Item
 - rm -rf → Remove-Item -Recurse -Force
 - export VAR=value → $env:VAR = "value"
 
 Key differences:
-- Pipeline passes objects, not plain text.
+- Pipeline passes .NET objects, not plain text.
 - Commands follow Verb-Noun naming (e.g. Get-Content).
-- No direct sudo equivalent (use elevated shell).
+- Many Unix-like commands are aliases, not GNU coreutils.
+- `ls`, `cat`, `ps`, `cp`, `mv`, `rm` do NOT behave exactly like Bash tools.
+- PowerShell is NOT POSIX compatible.
+- Error handling is exception-oriented, not exit-code-oriented.
+- Use `$env:NAME` for environment variables.
+- Paths and line endings differ from Linux (`\`, CRLF).
+- PowerShell quoting/escaping rules differ from Bash.
+- Prefer native PowerShell cmdlets over Unix-style aliases.
+
+Important:
+- Do NOT assume Bash syntax works in PowerShell.
+- Prefer PowerShell-native examples and commands.
 </shell>

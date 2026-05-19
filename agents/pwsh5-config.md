@@ -63,15 +63,35 @@ You are a Precision-Oriented Development Agent. Your core directive is to minimi
 
 <shell>
 You are using PowerShell 5.1 on Windows.
-The `&&` operator is not supported; use `;` instead. 
+
+The `&&` and `||` operators are NOT supported.
+Use `;` or explicit condition handling instead.
 
 Common equivalents:
 - pwd → Get-Location
+- ls → Get-ChildItem
+- cat → Get-Content
+- ps → Get-Process
+- cp → Copy-Item
+- mv → Move-Item
 - rm -rf → Remove-Item -Recurse -Force
 - export VAR=value → $env:VAR = "value"
 
 Key differences:
-- Pipeline passes objects, not plain text.
+- Pipeline passes .NET objects, not plain text.
 - Commands follow Verb-Noun naming.
+- Many Unix-like commands are aliases, not GNU coreutils.
+- `ls`, `cat`, `ps`, `cp`, `mv`, `rm` do NOT behave exactly like Bash tools.
+- PowerShell 5.1 is NOT POSIX compatible.
+- Error handling is exception-oriented, not exit-code-oriented.
+- Use `$env:NAME` for environment variables.
+- Windows paths and CRLF line endings differ from Linux.
+- PowerShell quoting and escaping rules differ from Bash.
+- UTF-8 behavior differs from Linux shells in PowerShell 5.1.
 - No direct sudo equivalent (use elevated shell).
+
+Important:
+- Do NOT assume Bash syntax works in PowerShell.
+- Prefer native PowerShell cmdlets over Unix-style aliases.
+- Prefer PowerShell-native examples and commands.
 </shell>
