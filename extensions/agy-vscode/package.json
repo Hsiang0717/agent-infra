@@ -1,7 +1,7 @@
 {
-  "name": "geminicli-extension",
-  "displayName": "Gemini CLI",
-  "description": "Quickly open Gemini CLI in a native terminal.",
+  "name": "agy-extension",
+  "displayName": "AGY CLI",
+  "description": "Quickly open AGY CLI in a native terminal.",
   "version": "0.0.2",
   "publisher": "Hsiang0717",
   "repository": {
@@ -17,20 +17,20 @@
   ],
   "main": "./out/extension.js",
   "activationEvents": [
-    "onCommand:geminicli.start"
+    "onCommand:agy.start"
   ],
   "contributes": {
     "commands": [
       {
-        "command": "geminicli.start",
-        "title": "Open Gemini CLI",
+        "command": "agy.start",
+        "title": "Open AGY CLI",
         "icon": "resources/icon.svg"
       }
     ],
     "menus": {
       "editor/title": [
         {
-          "command": "geminicli.start",
+          "command": "agy.start",
           "group": "navigation",
           "when": "true"
         }
@@ -43,7 +43,9 @@
     "watch": "tsc -watch -p ./",
     "pretest": "pnpm run compile && pnpm run lint",
     "lint": "eslint src --ext ts",
-    "test": "node ./out/test/runTest.js"
+    "test": "node ./out/test/runTest.js",
+    "package": "vsce package",
+    "install-extension": "code --install-extension *.vsix --force"
   },
   "devDependencies": {
     "@types/node": "16.x",
