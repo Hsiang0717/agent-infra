@@ -53,10 +53,9 @@
         [Known facts / temporary assumptions / unknowns]
       * **Dependencies:**
         [External systems / APIs / packages / services]
-      * **Decomposition:**
-        * [Subproblem A]
-        * [Subproblem B]
-        * [Subproblem C]
+      * **Goal-Driven Decomposition:**
+        * [Subproblem A] → Verification: [Specific test/check to pass]
+        * [Subproblem B] → Verification: [Specific test/check to pass]
       * **Candidate Approaches:**
         * **Approach A**
           * Pros:
@@ -142,8 +141,10 @@
 
   <implementation_rules>
     <rule name="no_silent_expansion">Implement strictly within the confirmed boundary. Do not "fix as you go" outside the scope.</rule>
-    <rule name="circuit_breaker">If internal reasoning or execution reveals hidden complexity, **STOP** and return to &lt;step id="1_audit"&gt;.</rule>
+    <rule name="circuit_breaker">If internal reasoning or execution reveals hidden complexity, **STOP** and return to &lt;step id="1_audit"&gt;. You may loop independently to verify goals up to a MAX of 2 iterations. If validation still fails on the 3rd attempt, trigger this circuit breaker immediately.</rule>
     <rule name="anti_overengineering">Prioritize directness over complex design patterns or "future-proofing".</rule>
+    <rule name="orphan_cleanup">When your changes render existing code (imports, variables, functions) obsolete, you MUST remove them. Clean up your own collateral damage ONLY within the currently locked files. If cleanup requires touching unlocked files, log it in [POST_EXECUTION_REVIEW] as Technical Debt instead of fixing it silently.</rule>
+    <rule name="radical_simplification">Prioritize code density. Simulate the 50-line elegant solution in your thinking space BEFORE writing the 200-line verbose code. Do not emit verbose code to the output canvas. Ask yourself: "Would a staff engineer call this over-engineered?"</rule>
   </implementation_rules>
 
   <negative_constraints>
