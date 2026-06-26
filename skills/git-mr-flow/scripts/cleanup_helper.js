@@ -2,10 +2,19 @@ const { execSync } = require('child_process');
 
 function getDefaultBranch() {
   try {
-    // Try to get default branch from remote, fallback to main
-    const remoteInfo = execSync('git remote show origin', { encoding: 'utf8' });
+    // 1. Try to read local tracking info for origin HEAD (very fast, no network)
+    const localRemoteHead = execSync('git symbolic-ref refs/remotes/origin/HEAD', { encoding: 'utf8', stdio: 'pipe' }).trim();
+    const match = localRemoteHead.match(/origin\/(.*)/);
+    if (match) return match[1].trim();
+  } catch (e) {
+    // Fallback if local remote HEAD tracking is not set
+  }
+
+  try {
+    // 2. Try to get default branch from remote, fallback to main
+    const remoteInfo = execSync('git remote show origin', { encoding: 'utf8', stdio: 'pipe' });
     const match = remoteInfo.match(/HEAD branch: (.*)/);
-    return match ? match[1] : 'main';
+    return match ? match[1].trim() : 'main';
   } catch (e) {
     return 'main';
   }
@@ -13,6 +22,13 @@ function getDefaultBranch() {
 
 function cleanup() {
   try {
+    // Check if workspace is dirty before switching branches to avoid conflicts or loss of work
+    const workspaceStatus = execSync('git status --porcelain', { encoding: 'utf8' }).trim();
+    if (workspaceStatus !== '') {
+      console.error('\n❌ Error: Working directory is dirty. Please stash or commit changes before cleanup.\n');
+      process.exit(1);
+    }
+
     const currentBranch = execSync('git rev-parse --abbrev-ref HEAD', { encoding: 'utf8' }).trim();
     const mainBranch = getDefaultBranch();
 
@@ -30,7 +46,7 @@ function cleanup() {
     
     if (!mergedBranches.includes(`origin/${currentBranch}`)) {
       console.warn(`\n⚠️  WARNING: Branch '${currentBranch}' does not appear to be merged into 'origin/${mainBranch}'.`);
-      console.warn(`Please ensure the PR/MR is approved and merged on the remote platform first.\n`);
+      console.warn(`Please ensure the MR is approved and merged on the remote platform first.\n`);
       // We don't exit(1) because the user might have merged it and we just need to pull, 
       // but we will proceed with caution.
     }

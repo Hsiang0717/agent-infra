@@ -30,21 +30,34 @@ function pushAndGuard() {
     }
 
     console.log(`Pushing branch: ${currentBranch} to origin...`);
-    execSync(`git push -u origin ${currentBranch}`, { stdio: 'inherit' });
+    
+    try {
+      execSync(`git push -u origin ${currentBranch}`, { stdio: 'inherit' });
+    } catch (pushError) {
+      console.error('\n' + '!'.repeat(60));
+      console.error('❌ PUSH FAILED');
+      console.error('Possible causes:');
+      console.error('1. You do not have write permissions to this remote repository.');
+      console.error('2. Your SSH keys or Access Tokens (HTTPS) are not correctly configured.');
+      console.error('3. The remote repository URL is invalid.');
+      console.error('Please verify your Git setup and try pushing manually.');
+      console.error('!'.repeat(60) + '\n');
+      throw pushError;
+    }
 
-    const prLink = generatePRLink(remoteUrl, currentBranch);
+    const mrLink = generatePRLink(remoteUrl, currentBranch);
     
     console.log('\n' + '='.repeat(60));
     console.log('🚀 PUSH SUCCESSFUL');
-    console.log(`🔗 PR/MR Link: ${prLink}`);
+    console.log(`🔗 MR Link: ${mrLink}`);
     console.log('='.repeat(60));
     console.log('\n[GATEKEEPER PROTOCOL ACTIVATED]');
     console.log('DO NOT perform any local merges or deletions.');
-    console.log('Please wait for the Merge Request to be reviewed and merged on the remote platform.');
+    console.log('Please wait for the Merge Request (MR) to be reviewed and merged on the remote platform.');
     console.log('='.repeat(60) + '\n');
 
   } catch (error) {
-    console.error(`Push failed: ${error.message}`);
+    console.error(`Execution failed: ${error.message}`);
     process.exit(1);
   }
 }

@@ -1,7 +1,36 @@
 const fs = require('fs');
 const path = require('path');
 
+function ensureLocalIgnore() {
+  try {
+    const gitDir = path.join(process.cwd(), '.git');
+    if (fs.existsSync(gitDir)) {
+      const excludePath = path.join(gitDir, 'info', 'exclude');
+      const excludeDir = path.dirname(excludePath);
+      
+      if (!fs.existsSync(excludeDir)) {
+        fs.mkdirSync(excludeDir, { recursive: true });
+      }
+
+      let content = '';
+      if (fs.existsSync(excludePath)) {
+        content = fs.readFileSync(excludePath, 'utf8');
+      }
+
+      if (!content.includes('.git-mr-flow.md')) {
+        const lineToAdd = '\n# git-mr-flow local config ignore\n.git-mr-flow.md\n';
+        fs.appendFileSync(excludePath, lineToAdd, 'utf8');
+      }
+    }
+  } catch (e) {
+    // Fail silently to avoid interrupting the metadata gather
+  }
+}
+
 function gatherProjectMetadata() {
+  // Ensure local ignore is configured
+  ensureLocalIgnore();
+
   const metadata = {
     structure: [],
     keyFiles: [],
