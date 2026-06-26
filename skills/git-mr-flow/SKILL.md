@@ -1,9 +1,9 @@
 ---
-name: git-feat-flow
-description: AI-adaptive Git workflow for Feature Branches. Supports automatic project analysis, custom rule generation (.git-feat-flow.md), granular commits, and safe rebase management.
+name: git-mr-flow
+description: AI-adaptive Git workflow for Feature Branches focusing on Merge Requests. Supports automatic project analysis, custom rule generation (.git-mr-flow.md), granular commits, and safe rebase management.
 ---
 
-# Git Feature Flow (AI-Powered)
+# Git Merge Request Flow (AI-Powered)
 
 This skill utilizes AI semantic analysis to adapt to any project structure, transforming the Agent into a Git consultant with deep project context.
 
@@ -12,7 +12,7 @@ This skill utilizes AI semantic analysis to adapt to any project structure, tran
 ### 1. AI Project Adaptation
 1. **Pilot (AI) Command**: Invoke `scripts/project_initializer.js`.
 2. **Executor (Script) Execution**: Scans directory structure, critical files, and **Remote Status**. Outputs project metadata in JSON format.
-3. **Pilot (AI) Reasoning**: Reads JSON to determine project type, appropriate Scope categories, and **Workflow Mode (local/collaborative)**. Generates `.git-feat-flow.md`.
+3. **Pilot (AI) Reasoning**: Reads JSON to determine project type, appropriate Scope categories, and **Workflow Mode (local/collaborative)**. Generates `.git-mr-flow.md`.
 
 ### 2. Branching Guard & Granular Commits
 1. **Pilot (AI) Pre-check**: Invoke `git branch --show-current`. If on `main`/`master`, perform automatic branch diversion (create feature branch).
@@ -20,8 +20,8 @@ This skill utilizes AI semantic analysis to adapt to any project structure, tran
 3. **Pilot (AI) Semantic Analysis**: Analyze `git diff` and grouping results to generate precise Conventional Commits for each group.
 4. **Gatekeeper (AI) Protocol**: 
    - If `workflow_mode` is `collaborative`, execute `scripts/push_handler.js`.
-   - **HALT all automated actions** after the script outputs the PR link and Gatekeeper warning.
-   - Instruct the user to initiate a Merge Request (MR/PR). **DO NOT** merge into protected branches locally.
+   - **HALT all automated actions** after the script outputs the MR link and Gatekeeper warning.
+   - Instruct the user to initiate a Merge Request (MR). **DO NOT** merge into protected branches locally.
 
 ### 3. Safe Synchronization (Safe Rebase)
 1. **Executor (Script) Check**: Invoke `scripts/rebase_helper.js` to ensure the workspace is clean and not on the main branch.
@@ -34,12 +34,12 @@ This skill utilizes AI semantic analysis to adapt to any project structure, tran
 
 ## Command Reference
 
-- **"Analyze project and setup git-feat-flow"**: Start the adaptation process, detect environment, and set `workflow_mode`.
+- **"Analyze project and setup git-mr-flow"**: Start the adaptation process, detect environment, and set `workflow_mode`.
 - **"Help me commit these changes in batches"**: Perform granular commits. In collaborative mode, use `push_handler.js` to push and then enter a waiting state.
 - **"Sync changes and handle conflicts"**: Execute Rebase with AI conflict assistance.
 - **"Task complete, help me cleanup the branch"**: Execute `cleanup_helper.js` AFTER confirmation of merge to ensure local/remote synchronization.
 
-## Configuration: .git-feat-flow.md
+## Configuration: .git-mr-flow.md
 Located in the project root, containing:
 - `workflow_mode`: `local` (personal) or `collaborative` (team-based, requires MR).
 - `mappings`: Path-to-Scope/Type mappings.
