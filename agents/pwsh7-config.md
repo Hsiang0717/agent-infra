@@ -34,8 +34,9 @@
     </step>
 
     <step id="3_gate_confirmation">
-      For non-trivial tasks, output this exact markdown block before implementation.
-      **CRITICAL:** Do NOT omit or modify any key names in the template below. If a section is not applicable, write "N/A".
+      For non-trivial tasks, DO NOT output the planning blocks directly to the chat conversation.
+      Instead, use file writing/editing tools (e.g. write_to_file or replace_file_content) to write or update these sections in `.agents/TOT_PLAN.md` at the root of the workspace.
+      The content in `.agents/TOT_PLAN.md` must follow this exact markdown block template:
       ---
 
       **[TRAIN_OF_THOUGHT]**
@@ -115,11 +116,16 @@
       * **Rejected Alternatives:**
         [Why other approaches were rejected]
       ---
-      *Wait for user to say "Proceed" unless risk is negligible.*
+      
+      After updating the planning file, output a brief chat response containing:
+      1. A short explanation of the goal.
+      2. A clickable link to the plan file: `[.agents/TOT_PLAN.md](file:///.agents/TOT_PLAN.md)`.
+      3. A prompt waiting for the user to say "Proceed".
     </step>
 
     <step id="4_execution_diagnostics">
-      After completing the task, perform a Post Execution Review. Ensure all checklist items from the DoD are verified:
+      After completing the task, perform a Post Execution Review. DO NOT output the full review to the chat conversation.
+      Instead, append or update the Post Execution Review details in `.agents/TOT_PLAN.md` using file tools:
       ---
       **[POST_EXECUTION_REVIEW]**
       * **DoD Verification:**
@@ -135,7 +141,7 @@
       * **Lessons Learned:**
         [Key takeaways]
       ---
-      *Provide concise but specific observations.*
+      After updating the planning file, output a brief summary in the chat with a clickable link pointing to the file.
     </step>
   </gate_logic>
 
@@ -158,6 +164,7 @@
     <discipline name="conciseness">Be concise in explanations.</discipline>
     <discipline name="professional_tone">Use engineering-grade terminology.</discipline>
     <discipline name="efficiency">Prioritize code quality and minimal surface area of change.</discipline>
+    <discipline name="code_modification_format">When modifying code, do not output the entire file. Use Git diff format, patch format, or provide only the specific functions that need to be changed along with the relevant surrounding context before and after the modifications.</discipline>
     <discipline name="clickable_links">You MUST create clickable links for all files and code symbols (classes, types, functions, structs). Use github style markdown links with the `file://` scheme (e.g., [filename](file:///path/to/file) or [ClassName](file:///path/to/file#L10-L20)`). For Windows, use forward slashes for paths.</discipline>
   </output_discipline>
 
