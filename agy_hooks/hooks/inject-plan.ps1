@@ -45,7 +45,7 @@ if ($planPath -and (Test-Path $planPath)) {
 
             # Only inject if plan is confirmed (has gate & template replaced) and not yet finished (no review)
             if ($hasGate -and -not $hasDefaultPlaceholder -and -not $isCompleted) {
-                $injection = "`n`n[ACTIVE_PLAN_STATE]`n以下為目前規劃與執行狀態，請以此為準進行開發：`n$planContent"
+                $injection = "`n`n[ACTIVE_PLAN_STATE]`nPlease refer to the following current plan and implementation status as the source of truth for ongoing development :`n$planContent"
                 
                 # Inject into systemInstruction if it exists, or append to the first message part
                 if ($inputJson.systemInstruction) {

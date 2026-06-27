@@ -28,10 +28,11 @@ $FG_BRIGHT_WHITE = "$ESC[97m"
 $NUM_COLOR = "${FG_BRIGHT_WHITE}${B}"
 
 # Parse JSON from stdin
-$stdin = $input | Out-String
+$stdin = ($input | Out-String).Trim().Trim([char]65279)
 
 $state = "idle"
-$used_pct = 0.0
+$rem_pct = 100.0
+$cache_read = 0
 $vcs_branch = ""
 $vcs_dirty = $false
 $sandbox = $false
@@ -46,13 +47,26 @@ if ($stdin) {
         $data = ConvertFrom-Json $stdin
         if ($data) {
             if ($data.agent_state) { $state = $data.agent_state }
-            if ($data.context_window -and $data.context_window.used_percentage -ne $null) { $used_pct = [double]$data.context_window.used_percentage }
+            if ($data.context_window) {
+                if ($data.context_window.remaining_percentage -ne $null) {
+                    $rem_pct = [double]$data.context_window.remaining_percentage
+                }
+                if ($data.context_window.current_usage -and $data.context_window.current_usage.cache_read_input_tokens -ne $null) {
+                    $cache_read = [int]$data.context_window.current_usage.cache_read_input_tokens
+                }
+            }
             if ($data.vcs) {
                 if ($data.vcs.branch) { $vcs_branch = $data.vcs.branch }
                 if ($data.vcs.dirty -eq $true -or $data.vcs.dirty -eq "true") { $vcs_dirty = $true }
             }
             if ($data.sandbox -and ($data.sandbox.enabled -eq $true -or $data.sandbox.enabled -eq "true")) { $sandbox = $true }
-            if ($data.artifact_count -ne $null) { $artifacts = [int]$data.artifact_count }
+            if ($data.artifacts -ne $null) {
+                if ($data.artifacts -is [array]) {
+                    $artifacts = $data.artifacts.Count
+                } else {
+                    $artifacts = 1
+                }
+            }
             if ($data.subagents) {
                 if ($data.subagents -is [array]) {
                     $subagents = $data.subagents.Count
@@ -60,7 +74,13 @@ if ($stdin) {
                     $subagents = $data.subagents
                 }
             }
-            if ($data.task_count -ne $null) { $bg_tasks = [int]$data.task_count }
+            if ($data.background_tasks -ne $null) {
+                if ($data.background_tasks -is [array]) {
+                    $bg_tasks = $data.background_tasks.Count
+                } else {
+                    $bg_tasks = 1
+                }
+            }
             if ($data.model -and $data.model.display_name) { $model = $data.model.display_name }
             if ($data.terminal_width -ne $null) { $cols = [int]$data.terminal_width }
         }
@@ -70,8 +90,8 @@ if ($stdin) {
 }
 
 # Computed Values
-$pct_fmt = $used_pct.ToString("F1", [System.Globalization.CultureInfo]::InvariantCulture)
-$pct_int = [int][math]::Floor($used_pct)
+$pct_fmt = $rem_pct.ToString("F1", [System.Globalization.CultureInfo]::InvariantCulture)
+$pct_int = [int][math]::Floor($rem_pct)
 
 # State Indicator
 switch ($state) {
@@ -110,9 +130,10 @@ $bar_len = 15
 $filled = [int][math]::Floor(($pct_int * $bar_len) / 100)
 $remainder = ($pct_int * $bar_len) % 100
 
-if ($pct_int -ge 90) {
+# Color scale based on remaining percentage
+if ($pct_int -le 10) {
     $bar_color = $FG_BRIGHT_RED
-} elseif ($pct_int -ge 60) {
+} elseif ($pct_int -le 40) {
     $bar_color = $FG_BRIGHT_YELLOW
 } else {
     $bar_color = $FG_BRIGHT_WHITE
@@ -132,8 +153,15 @@ for ($i = 0; $i -lt $bar_len; $i++) {
     }
 }
 
+# Cache hit formatting
+$cache_fmt = ""
+if ($cache_read -gt 0) {
+    $cache_kb = [math]::Round($cache_read / 1000, 1).ToString("F1", [System.Globalization.CultureInfo]::InvariantCulture)
+    $cache_fmt = " ${FG_GRAY}(cache ${FG_BRIGHT_GREEN}${cache_kb}k${FG_GRAY})${R}"
+}
+
 # Stats
-$ctx = "${FG_GRAY}ctx ${bar_color}${bar} ${NUM_COLOR}${pct_fmt}%${R}"
+$ctx = "${FG_GRAY}rem ${bar_color}${bar} ${NUM_COLOR}${pct_fmt}%${R}${cache_fmt}"
 $art_fmt = "${FG_GRAY}artifacts ${NUM_COLOR}${artifacts}${R}"
 $sub_fmt = "${FG_GRAY}subagents ${NUM_COLOR}${subagents}${R}"
 $bg_fmt = "${FG_GRAY}tasks ${NUM_COLOR}${bg_tasks}${R}"
