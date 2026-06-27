@@ -1,0 +1,10 @@
+{
+  "hooks": {
+    "PreInvocation": [
+      {
+        "type": "command",
+        "command": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File ~/.gemini/config/hooks/inject-plan.ps1"
+      }
+    ]
+  }
+}

@@ -27,31 +27,50 @@ export function activate(context: vscode.ExtensionContext) {
             }
         }
 
-        // Build environment variables (keep VIRTUAL_ENV to prevent MS-Python from double-activating)
+        // Determine shell based on platform
+        const isWin = process.platform === 'win32';
+        let shellPath = isWin ? 'powershell.exe' : '/bin/bash';
+
+        // Check if pwsh is available on Windows
+        if (isWin) {
+            const envPaths = (process.env.PATH || '').split(path.delimiter);
+            const hasPwsh = envPaths.some(p => {
+                try {
+                    return fs.existsSync(path.join(p, 'pwsh.exe')) || fs.existsSync(path.join(p, 'pwsh'));
+                } catch {
+                    return false;
+                }
+            });
+            if (hasPwsh) {
+                shellPath = 'pwsh';
+            }
+        }
+
+        // Build environment variables (prevent double-activation conflicts)
         const env: { [key: string]: string } = {
             VIRTUAL_ENV: venvPath || 'prevent-activation',
             CONDA_PREFIX: 'prevent-activation'
         };
 
-        // Create clean PowerShell terminal
+        // Create clean terminal
         const terminal = vscode.window.createTerminal({
             name: 'AGY CLI',
             location: vscode.TerminalLocation.Editor,
-            shellPath: 'pwsh',
-            shellArgs: ['-NoProfile'],
+            shellPath: shellPath,
+            shellArgs: isWin ? ['-NoProfile'] : [],
             env: env
         });
 
         // Show terminal
         terminal.show(false);
 
-        // Allow shell process to initialize (prevent PSReadLine from swallowing the newline)
-        await delay(1000);
+        // Allow shell process to initialize
+        await delay(800);
 
         // Build startup command: activate venv first (if present), then run agy
         let startCommand = 'agy';
         if (venvPath) {
-            if (process.platform === 'win32') {
+            if (isWin) {
                 const activateScript = path.join(venvPath, 'Scripts', 'Activate.ps1');
                 startCommand = `& "${activateScript}"; agy`;
             } else {

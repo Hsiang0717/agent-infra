@@ -35,8 +35,11 @@
 
     <step id="3_gate_confirmation">
       For non-trivial tasks, DO NOT output the planning blocks directly to the chat conversation.
-      Instead, use file writing/editing tools (e.g. write_to_file or replace_file_content) to write or update these sections in `.agents/TOT_PLAN.md` at the root of the workspace.
-      The content in `.agents/TOT_PLAN.md` must follow this exact markdown block template:
+      Instead, use file writing/editing tools (e.g. write_to_file or replace_file_content) to write or update these sections in `.agents/ENGINEERING_DOSSIER.md` at the root of the workspace.
+      
+      CRITICAL TOKEN SAVING CONSTRAINT: You MUST use strictly concise, bulleted keywords (maximum 15 words per bullet point) for all sections of the planning file. Do NOT write paragraphs, narratives, or verbose explanations.
+      
+      The content in `.agents/ENGINEERING_DOSSIER.md` must follow this exact markdown block template:
       ---
 
       **[TRAIN_OF_THOUGHT]**
@@ -119,13 +122,13 @@
       
       After updating the planning file, output a brief chat response containing:
       1. A short explanation of the goal.
-      2. A clickable link to the plan file: `[.agents/TOT_PLAN.md](file:///.agents/TOT_PLAN.md)`.
+      2. A clickable link to the plan file: `[.agents/ENGINEERING_DOSSIER.md](file:///.agents/ENGINEERING_DOSSIER.md)`.
       3. A prompt waiting for the user to say "Proceed".
     </step>
 
     <step id="4_execution_diagnostics">
       After completing the task, perform a Post Execution Review. DO NOT output the full review to the chat conversation.
-      Instead, append or update the Post Execution Review details in `.agents/TOT_PLAN.md` using file tools:
+      Instead, append or update the Post Execution Review details in `.agents/ENGINEERING_DOSSIER.md` using file tools:
       ---
       **[POST_EXECUTION_REVIEW]**
       * **DoD Verification:**
@@ -147,6 +150,7 @@
 
   <implementation_rules>
     <rule name="no_silent_expansion">Implement strictly within the confirmed boundary. Do not "fix as you go" outside the scope.</rule>
+    <rule name="incremental_dossier_edits">When updating `.agents/ENGINEERING_DOSSIER.md`, you MUST use precise file editing tools (such as replace_file_content or multi_replace_file_content) to modify only the targeted sections (e.g., ticking DoD checkboxes or appending reviews). Never overwrite or recreate the entire dossier file.</rule>
     <rule name="circuit_breaker">If internal reasoning or execution reveals hidden complexity, **STOP** and return to &lt;step id="1_audit"&gt;. You may loop independently to verify goals up to a MAX of 2 iterations. If validation still fails on the 3rd attempt, trigger this circuit breaker immediately.</rule>
     <rule name="anti_overengineering">Prioritize directness over complex design patterns or "future-proofing".</rule>
     <rule name="orphan_cleanup">When your changes render existing code (imports, variables, functions) obsolete, you MUST remove them. Clean up your own collateral damage ONLY within the currently locked files. If cleanup requires touching unlocked files, log it in [POST_EXECUTION_REVIEW] as Technical Debt instead of fixing it silently.</rule>
