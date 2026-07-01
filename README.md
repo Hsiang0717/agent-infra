@@ -1,20 +1,37 @@
-# Agent Infra
+# Agent Infra (AGY 基礎設施)
 
-本專案旨在整理與開發 AGY CLI 相關的基礎設施，包含 Agent 配置、VS Code 擴充套件、功能性 Skills 以及相關技術文件。
+本專案提供基於 PowerShell 7 運行的 Agent 模組化框架與管理工具，旨在協助 Agent 在開發期達成精準的任務規劃（Minimizing Technical Debt）與指令安全管理。
 
-## 📂 專案結構
+## 📂 核心架構
 
-- **[agents/](./agents/)**: 存放不同環境與角色的 System Prompts 配置。
-  - `pwsh5-config.md`: PowerShell 5.x 環境配置。
-  - `pwsh7-config.md`: PowerShell 7.x 環境配置。
-- **[extensions/](./extensions/)**: 開發中的 IDE 擴充套件。
-  - `agy-vscode/`: AGY CLI 的 VS Code 整合插件。
-- **[skills/](./skills/)**: 增強 Agent 能力的工具與規範。
-  - `annotation-expert/`: 自動化程式碼註解專家。
-- **[docs/](./docs/)**: 系統安裝與環境設定指南。
-  - `pwsh7-setup.md`: PowerShell 7 環境安裝教學。
+* **[agents/](file:///C:/Users/Administrator/Desktop/skill開發/agent-infra/agents/)**: Agent 的系統提示詞（System Prompts）配置。
+  * [pwsh7-config-modular.md](file:///C:/Users/Administrator/Desktop/skill開發/agent-infra/agents/pwsh7-config-modular.md): 模組化動態載入的系統提示詞。
+* **[skills/](file:///C:/Users/Administrator/Desktop/skill開發/agent-infra/skills/)**: 專屬功能擴充模組。
+  * [tbp-engineering-protocol](file:///C:/Users/Administrator/Desktop/skill開發/agent-infra/skills/tbp-engineering-protocol/): 工程規劃與 Gate 審核協議。
+  * [powershell-helper](file:///C:/Users/Administrator/Desktop/skill開發/agent-infra/skills/powershell-helper/): PowerShell 指令映射與安全性校驗。
+  * [git-mr-flow](file:///C:/Users/Administrator/Desktop/skill開發/agent-infra/skills/git-mr-flow/): 基於 MR 的 Git 工作流引導。
+* **[status/](file:///C:/Users/Administrator/Desktop/skill開發/agent-infra/status/)**: 系統狀態與快取健全度檢查工具。
 
-## 🚀 快速開始
+---
 
-Windows 用戶建議
-請參考 [docs/pwsh7-setup.md](./docs/pwsh7-setup.md) 進行初始環境配置。
+## 🚀 如何使用與運作流程
+
+本系統基於**四階段狀態機**進行任務生命週期管理：
+
+### 1. 狀態載入 (Startup)
+Agent 啟動時會讀取並載入目前的環境配置與記憶狀態：
+* 讀取狀態檔：[.agents/session-state.json](file:///C:/Users/Administrator/Desktop/skill開發/.agents/session-state.json)
+* 讀取規劃日誌：[.agents/ENGINEERING_DOSSIER.md](file:///C:/Users/Administrator/Desktop/skill開發/.agents/ENGINEERING_DOSSIER.md)
+
+### 2. 工程規劃與 Gate 審核 (TBP Protocol)
+非瑣碎（Non-trivial）任務必須在 [.agents/ENGINEERING_DOSSIER.md](file:///C:/Users/Administrator/Desktop/skill開發/.agents/ENGINEERING_DOSSIER.md) 中填寫規劃，並受以下安全規則約束：
+* **字數約束**：所有規劃項目每行 Bullet Point 不得超過 15 個單字。
+* **規劃校驗**：使用腳本 [Invoke-DossierLinter.ps1](file:///C:/Users/Administrator/Desktop/skill開發/agent-infra/skills/tbp-engineering-protocol/scripts/Invoke-DossierLinter.ps1) 自動進行格式與字數檢查。
+* **安全校驗**：所有執行的 PowerShell 命令皆經由 [Test-SafeCommand.ps1](file:///C:/Users/Administrator/Desktop/skill開發/agent-infra/skills/powershell-helper/scripts/Test-SafeCommand.ps1) 過濾危險別名與 Unix 命令。
+
+### 3. 進度與記憶存檔 (Save State)
+當您在對話中說出 **「存檔」**、**「保存進度」** 等關鍵字時，Agent 會主動執行：
+```powershell
+powershell -ExecutionPolicy Bypass -File .agents/skills/tbp-engineering-protocol/scripts/Save-SessionState.ps1 -ConversationId <當前對話ID>
+```
+這會將最新的對話 ID、時間戳與狀態更新至 [.agents/session-state.json](file:///C:/Users/Administrator/Desktop/skill開發/.agents/session-state.json)。
