@@ -30,8 +30,9 @@ Agent 啟動時會讀取並載入目前的環境配置與記憶狀態：
 * **安全校驗**：所有執行的 PowerShell 命令皆經由 [Test-SafeCommand.ps1](file:///C:/Users/Administrator/Desktop/skill開發/agent-infra/skills/powershell-helper/scripts/Test-SafeCommand.ps1) 過濾危險別名與 Unix 命令。
 
 ### 3. 進度與記憶存檔 (Save State)
-當您在對話中說出 **「存檔」**、**「保存進度」** 等關鍵字時，Agent 會主動執行：
+當您在對話中說出 **「存檔」**、**「保存進度」** 等關鍵字時，Agent 會主動執行 CSD (Consented State Distillation) 協定，從當前上下文蒸餾出已完成里程碑與未解決問題，並寫入 [.agents/session-state.json](file:///C:/Users/Administrator/Desktop/skill開發/.agents/session-state.json)：
 ```powershell
-powershell -ExecutionPolicy Bypass -File .agents/skills/tbp-engineering-protocol/scripts/Save-SessionState.ps1 -ConversationId <當前對話ID>
+powershell -ExecutionPolicy Bypass -File .agents/skills/tbp-engineering-protocol/scripts/Save-SessionStateWithCSD.ps1 -ConversationId <當前對話ID> -CompletedMilestonesJson '<milestones_json>' -OpenProblemsJson '<problems_json>'
 ```
-這會將最新的對話 ID、時間戳與狀態更新至 [.agents/session-state.json](file:///C:/Users/Administrator/Desktop/skill開發/.agents/session-state.json)。
+（亦可降級為不含 CSD 蒸餾的快速存檔：使用 `Save-SessionState.ps1` 僅更新會話 ID 與時間戳）。
+
