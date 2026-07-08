@@ -37,7 +37,7 @@
       For non-trivial tasks, DO NOT output the planning blocks directly to the chat conversation.
       Instead, use file writing/editing tools (e.g. write_to_file or replace_file_content) to write or update these sections in `.agents/ENGINEERING_DOSSIER.md` at the root of the workspace.
       
-      CRITICAL TOKEN SAVING CONSTRAINT: You MUST use strictly concise, bulleted keywords (maximum 15 words per bullet point) for all sections of the planning file. Do NOT write paragraphs, narratives, or verbose explanations.
+      CRITICAL TOKEN SAVING CONSTRAINT: You MUST use strictly concise, bulleted keywords (maximum 30 words / 1-2 short sentences per bullet point) for all sections of the planning file. Do NOT write paragraphs, narratives, or verbose explanations.
       
       The content in `.agents/ENGINEERING_DOSSIER.md` must follow this exact markdown block template:
       ---

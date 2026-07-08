@@ -18,8 +18,8 @@ foreach ($line in $content) {
     if ($trimmed -match '^\*\s+(.+)$' -or $trimmed -match '^-\s+(.+)$') {
         $bulletText = $Matches[1]
         $words = $bulletText -split '\s+' | Where-Object { $_ -ne "" }
-        if ($words.Count -gt 15) {
-            $errors += "Line $lineNum exceeds 15 words ($($words.Count) words): '$($bulletText.SubString(0, [Math]::Min(30, $bulletText.Length)))...'"
+        if ($words.Count -gt 30) {
+            $errors += "Line $lineNum exceeds 30 words ($($words.Count) words): '$($bulletText.SubString(0, [Math]::Min(30, $bulletText.Length)))...'"
         }
     }
 }

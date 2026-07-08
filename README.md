@@ -25,7 +25,7 @@ Agent 啟動時會讀取並載入目前的環境配置與記憶狀態：
 
 ### 2. 工程規劃與 Gate 審核 (TBP Protocol)
 非瑣碎（Non-trivial）任務必須在 [.agents/ENGINEERING_DOSSIER.md](file:///C:/Users/Administrator/Desktop/skill開發/.agents/ENGINEERING_DOSSIER.md) 中填寫規劃，並受以下安全規則約束：
-* **字數約束**：所有規劃項目每行 Bullet Point 不得超過 15 個單字。
+* **字數約束**：所有規劃項目每行 Bullet Point 不得超過 30 個單字（約 1-2 句短句）。
 * **規劃校驗**：使用腳本 [Invoke-DossierLinter.ps1](file:///C:/Users/Administrator/Desktop/skill開發/agent-infra/skills/tbp-engineering-protocol/scripts/Invoke-DossierLinter.ps1) 自動進行格式與字數檢查。
 * **安全校驗**：所有執行的 PowerShell 命令皆經由 [Test-SafeCommand.ps1](file:///C:/Users/Administrator/Desktop/skill開發/agent-infra/skills/powershell-helper/scripts/Test-SafeCommand.ps1) 過濾危險別名與 Unix 命令。
 
