@@ -2,7 +2,7 @@
   "name": "agy-extension",
   "displayName": "AGY CLI",
   "description": "Quickly open AGY CLI in a native terminal.",
-  "version": "0.0.2",
+  "version": "0.0.5",
   "publisher": "Hsiang0717",
   "repository": {
     "type": "git",
@@ -17,7 +17,9 @@
   ],
   "main": "./out/extension.js",
   "activationEvents": [
-    "onCommand:agy.start"
+    "onCommand:agy.start",
+    "onCommand:agy.wrapAsConflict",
+    "onCommand:agy.copyAsIntentDiff"
   ],
   "contributes": {
     "commands": [
@@ -25,6 +27,27 @@
         "command": "agy.start",
         "title": "Open AGY CLI",
         "icon": "resources/icon.svg"
+      },
+      {
+        "command": "agy.wrapAsConflict",
+        "title": "AGY: Wrap as Intent Conflict"
+      },
+      {
+        "command": "agy.copyAsIntentDiff",
+        "title": "AGY: Copy as Intent Prompt",
+        "icon": "$(copy)"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "agy.wrapAsConflict",
+        "key": "alt+-",
+        "when": "editorTextFocus"
+      },
+      {
+        "command": "agy.copyAsIntentDiff",
+        "key": "alt+shift+c",
+        "when": "editorTextFocus"
       }
     ],
     "menus": {
@@ -33,8 +56,35 @@
           "command": "agy.start",
           "group": "navigation",
           "when": "true"
+        },
+        {
+          "command": "agy.copyAsIntentDiff",
+          "group": "navigation",
+          "when": "true"
+        }
+      ],
+      "editor/context": [
+        {
+          "command": "agy.wrapAsConflict",
+          "group": "agy@1",
+          "when": "editorTextFocus"
+        },
+        {
+          "command": "agy.copyAsIntentDiff",
+          "group": "agy@2",
+          "when": "editorTextFocus"
         }
       ]
+    },
+    "configuration": {
+      "title": "AGY Intent Diff",
+      "properties": {
+        "agy.intentDiff.prefixTemplate": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "System instruction prefix prepended before the file content when using **Copy as Intent Prompt**. Example: `You are a code conflict resolver. Resolve the conflict markers below based on the intent described:`"
+        }
+      }
     }
   },
   "scripts": {
