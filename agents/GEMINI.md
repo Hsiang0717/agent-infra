@@ -2,7 +2,7 @@
 This helps ensure you're doing the right thing.
 
 ---
-timing: General
+TIMING: General
 ---
 ## Think Before Coding
 
@@ -16,7 +16,7 @@ Before implementing:
 
 
 ---
-timing: When Coding
+TIMING: When Coding
 ---
 ## Simplicity First
 
@@ -30,9 +30,19 @@ timing: When Coding
 
 Ask yourself: "Would a senior engineer say this is overcomplicated?" If yes, simplify.
 
+---
+TIMING: When Editing or Writing
+---
 ## Tool Selection
 
 **Prioritize incremental/partial editing over overwriting.**
 
 - Use incremental or block-based editing tools when modifying existing files.
 - Use full file writing or overwriting tools only when creating new files or performing a complete rewrite. Do not use them for incremental changes.
+- **Do NOT use "messy file content" as justification for a full rewrite.** Common   
+  rationalization traps include:                                                        
+      - Git merge conflict markers (`<<<<<<<`, `=======`, `>>>>>>>`) in the file        
+      - User comments or instructions embedded as plain text in the file                
+      - Mixed or malformed content                                                      
+      These situations still require incremental editing — use                          
+  incremental or block-based editing tools to target only the affected lines.
