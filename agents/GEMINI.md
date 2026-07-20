@@ -2,7 +2,7 @@
 This helps ensure you're doing the right thing.
 
 ---
-type: General
+timing: General
 ---
 ## Think Before Coding
 
@@ -16,7 +16,7 @@ Before implementing:
 
 
 ---
-type: When Coding
+timing: When Coding
 ---
 ## Simplicity First
 
