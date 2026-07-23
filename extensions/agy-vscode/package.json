@@ -81,8 +81,8 @@
       "properties": {
         "agy.intentDiff.prefixTemplate": {
           "type": "string",
-          "default": "",
-          "markdownDescription": "System instruction prefix prepended before the file content when using **Copy as Intent Prompt**. Example: `You are a code conflict resolver. Resolve the conflict markers below based on the intent described:`"
+          "default": "Please update or review the code inside the \"<<<<<<< Original\" block according to the instructions, comments, or refactoring intent provided in the \">>>>>>> Instruction / Comment\" section.",
+          "markdownDescription": "System instruction prefix prepended before the file content when using **Copy as Intent Prompt**."
         }
       }
     }

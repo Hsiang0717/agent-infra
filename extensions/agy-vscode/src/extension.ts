@@ -80,23 +80,33 @@ export function activate(context: vscode.ExtensionContext) {
         if (!editor) { return; }
 
         const selection = editor.selection;
-        const selectedText = editor.document.getText(selection);
+        const startLine = selection.start.line;
+        const endLine = selection.end.line;
+
+        // Auto-expand selection to full lines starting at column 0
+        const fullLineRange = new vscode.Range(
+            startLine, 0,
+            endLine, editor.document.lineAt(endLine).range.end.character
+        );
+
+        const selectedText = editor.document.getText(fullLineRange);
         const fileName = path.basename(editor.document.fileName);
-        const startLine = selection.start.line + 1; // 1-indexed for display
+        const displayStartLine = startLine + 1; // 1-indexed for display
 
         const conflictBlock =
-            `<<<<<<< Current (Line ${startLine}, ${fileName})\n` +
-            selectedText +
-            `\n=======\n` +
-            `>>>>>>> Incoming`;
+            `<<<<<<< Original (Line ${displayStartLine}, ${fileName})\n` +
+            selectedText + `\n` +
+            `=======\n` +
+            `\n` +
+            `>>>>>>> Instruction / Comment`;
 
         await editor.edit(editBuilder => {
-            editBuilder.replace(selection, conflictBlock);
+            editBuilder.replace(fullLineRange, conflictBlock);
         });
 
-        // Move cursor to just after ======= (the blank intent line)
-        const insertedLines = conflictBlock.split('\n');
-        const intentLine = selection.start.line + insertedLines.length - 2; // line after =======
+        // Move cursor to the blank line between ======= and >>>>>>> Instruction / Comment
+        const blockLines = conflictBlock.split('\n');
+        const intentLine = startLine + blockLines.length - 2;
         const intentPos = new vscode.Position(intentLine, 0);
         editor.selection = new vscode.Selection(intentPos, intentPos);
         editor.revealRange(new vscode.Range(intentPos, intentPos));
@@ -145,7 +155,9 @@ export function activate(context: vscode.ExtensionContext) {
         }
 
         const config = vscode.workspace.getConfiguration('agy.intentDiff');
-        const prefixTemplate = config.get<string>('prefixTemplate', '').trim();
+        const defaultPrefix = 'Please update or review the code inside the "<<<<<<< Original" block according to the instructions, comments, or refactoring intent provided in the ">>>>>>> Instruction / Comment" section.';
+        const userPrefix = config.get<string>('prefixTemplate', '').trim();
+        const prefixTemplate = userPrefix || defaultPrefix;
 
         const body = `File: ${relPath}\n\n` + blocks.join('\n\n');
         const finalOutput = prefixTemplate ? `${prefixTemplate}\n\n${body}` : body;

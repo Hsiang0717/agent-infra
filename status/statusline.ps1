@@ -645,22 +645,46 @@ function make_quota_bar($val, $label, $bar_color, $reset_sec) {
     }
 }
 
-# Determine active quota based on actual availability
-if (($GEMINI_5H -ne $null -and $GEMINI_5H -ne -1) -or ($GEMINI_WK -ne $null -and $GEMINI_WK -ne -1)) {
-    $Q_5H = $GEMINI_5H
-    $Q_WK = $GEMINI_WK
-    $Q_5H_R = $GEMINI_5H_RESET
-    $Q_WK_R = $GEMINI_WK_RESET
-} elseif (($TP_5H -ne $null -and $TP_5H -ne -1) -or ($TP_WK -ne $null -and $TP_WK -ne -1)) {
-    $Q_5H = $TP_5H
-    $Q_WK = $TP_WK
-    $Q_5H_R = $TP_5H_RESET
-    $Q_WK_R = $TP_WK_RESET
+# Determine active quota based on active model and quota availability
+$isGeminiModel = ($MODEL_ID -like "*gemini*" -or $MODEL_NAME -like "*gemini*")
+
+$hasGeminiQuota = (($GEMINI_5H -ne $null -and $GEMINI_5H -ne -1) -or ($GEMINI_WK -ne $null -and $GEMINI_WK -ne -1))
+$has3pQuota = (($TP_5H -ne $null -and $TP_5H -ne -1) -or ($TP_WK -ne $null -and $TP_WK -ne -1))
+
+if ($isGeminiModel) {
+    if ($hasGeminiQuota) {
+        $Q_5H = $GEMINI_5H
+        $Q_WK = $GEMINI_WK
+        $Q_5H_R = $GEMINI_5H_RESET
+        $Q_WK_R = $GEMINI_WK_RESET
+    } elseif ($has3pQuota) {
+        $Q_5H = $TP_5H
+        $Q_WK = $TP_WK
+        $Q_5H_R = $TP_5H_RESET
+        $Q_WK_R = $TP_WK_RESET
+    } else {
+        $Q_5H = -1
+        $Q_WK = -1
+        $Q_5H_R = -1
+        $Q_WK_R = -1
+    }
 } else {
-    $Q_5H = -1
-    $Q_WK = -1
-    $Q_5H_R = -1
-    $Q_WK_R = -1
+    if ($has3pQuota) {
+        $Q_5H = $TP_5H
+        $Q_WK = $TP_WK
+        $Q_5H_R = $TP_5H_RESET
+        $Q_WK_R = $TP_WK_RESET
+    } elseif ($hasGeminiQuota) {
+        $Q_5H = $GEMINI_5H
+        $Q_WK = $GEMINI_WK
+        $Q_5H_R = $GEMINI_5H_RESET
+        $Q_WK_R = $GEMINI_WK_RESET
+    } else {
+        $Q_5H = -1
+        $Q_WK = -1
+        $Q_5H_R = -1
+        $Q_WK_R = -1
+    }
 }
 
 $Q_5H_FMT = if (($Q_5H -ne $null -and $Q_5H -ne -1)) { make_quota_bar $Q_5H "5H" $FG_BRIGHT_CYAN $Q_5H_R } else { "" }
