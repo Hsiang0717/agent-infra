@@ -50,7 +50,7 @@ foreach ($arg in $args) {
 $inputJson = $input | Out-String
 if (-not $inputJson -or $inputJson.Trim().Length -eq 0) {
     # If no stdin, output nothing and exit
-    exit
+    exit 0
 }
 
 # Parse JSON safely
