@@ -244,17 +244,17 @@ $max_model_len = 40
 
 if ($COLS -lt 60) {
     $max_path_len = 12
-    $max_user_len = 10
+    $max_user_len = 15
     $max_host_len = 10
     $max_model_len = 20
 } elseif ($COLS -lt 90) {
     $max_path_len = 18
-    $max_user_len = 15
+    $max_user_len = 20
     $max_host_len = 15
     $max_model_len = 30
 } elseif ($COLS -lt 120) {
     $max_path_len = 25
-    $max_user_len = 20
+    $max_user_len = 25
     $max_host_len = 20
     $max_model_len = 40
 }
