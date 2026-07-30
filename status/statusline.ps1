@@ -57,9 +57,10 @@ if (-not $inputJson -or $inputJson.Trim().Length -eq 0) {
 try {
     $data = ConvertFrom-Json $inputJson
 } catch {
-    exit
+    exit 0
 }
 
+try {
 # Extract properties with fallbacks
 $STATE = if ($data.agent_state) { $data.agent_state } else { "idle" }
 $USED_PCT = if ($data.context_window.used_percentage -ne $null) { $data.context_window.used_percentage } else { 0 }
@@ -150,7 +151,7 @@ function Run-WithTimeout {
             if ($proc.WaitForExit($TimeoutMs)) {
                 return $proc.StandardOutput.ReadToEnd()
             } else {
-                $proc.Kill()
+                try { $proc.Kill() } catch {}
             }
         }
     } catch {}
@@ -200,25 +201,38 @@ $TURN_OUTPUT_FMT = human_format $TURN_OUTPUT_TOKENS
 
 function shorten_path($path, $max_len = 25) {
     if (-not $path) { return "" }
-    $homeDir = if ($env:USERPROFILE) { $env:USERPROFILE } else { $env:HOME }
-    if ($homeDir -and $path.StartsWith($homeDir)) {
-        $path = "~" + $path.Substring($homeDir.Length)
-    }
-    if ($path.Length -gt $max_len) {
-        $leaf = Split-Path $path -Leaf
-        if ($leaf.Length -gt ($max_len - 3)) {
-            $slice_len = $max_len - 3
-            if ($slice_len -lt 1) { $slice_len = 1 }
-            return "..." + $leaf.Substring($leaf.Length - $slice_len)
+    try {
+        $path = [string]$path
+        $homeDir = if ($env:USERPROFILE) { $env:USERPROFILE } else { $env:HOME }
+        if ($homeDir -and $path.StartsWith($homeDir)) {
+            $path = "~" + $path.Substring($homeDir.Length)
         }
-        return "..." + $leaf
+        if ($path.Length -gt $max_len) {
+            $leaf = ""
+            try {
+                $leaf = Split-Path $path -Leaf -ErrorAction Stop
+            } catch {
+                $parts = $path.Split([char[]]@('\', '/'))
+                $leaf = $parts[-1]
+            }
+            if ($leaf.Length -gt ($max_len - 3)) {
+                $slice_len = $max_len - 3
+                if ($slice_len -lt 1) { $slice_len = 1 }
+                return "..." + $leaf.Substring($leaf.Length - $slice_len)
+            }
+            return "..." + $leaf
+        }
+        return $path
+    } catch {
+        return ""
     }
-    return $path
 }
 
 function Truncate-String($str, $maxLen) {
-    if (-not $str -or $str.Length -le $maxLen) { return $str }
-    if ($maxLen -le 3) { return $str.Substring(0, $maxLen) }
+    if (-not $str) { return "" }
+    $str = [string]$str
+    if ($str.Length -le $maxLen) { return $str }
+    if ($maxLen -le 3) { return $str.Substring(0, [Math]::Max(0, $maxLen)) }
     return $str.Substring(0, $maxLen - 3) + "..."
 }
 
@@ -226,23 +240,23 @@ function Truncate-String($str, $maxLen) {
 $max_path_len = 25
 $max_user_len = 35
 $max_host_len = 30
-$max_model_len = 20
+$max_model_len = 40
 
 if ($COLS -lt 60) {
     $max_path_len = 12
     $max_user_len = 10
     $max_host_len = 10
-    $max_model_len = 10
+    $max_model_len = 20
 } elseif ($COLS -lt 90) {
     $max_path_len = 18
     $max_user_len = 15
     $max_host_len = 15
-    $max_model_len = 12
+    $max_model_len = 30
 } elseif ($COLS -lt 120) {
     $max_path_len = 25
     $max_user_len = 20
     $max_host_len = 20
-    $max_model_len = 15
+    $max_model_len = 40
 }
 
 $CWD_SHORT = shorten_path $CWD $max_path_len
@@ -373,7 +387,7 @@ $TS_IP = ""
 try {
     if (Get-Command tailscale -ErrorAction SilentlyContinue) {
         $tsStatus = tailscale ip -4 2>$null
-        if ($tsStatus) { $TS_IP = $tsStatus.Trim() }
+        if ($tsStatus) { $TS_IP = ($tsStatus | Out-String).Trim() }
     }
 } catch {}
 
@@ -799,20 +813,29 @@ function Format-FlexWrapLine($left_items, $right_items, $total_width) {
             $current_line_vis += $item_vis
         } else {
             if ($current_line_items.Length -gt 0) {
-                $pad = $max_content - $current_line_vis
+                $pad = [Math]::Max(0, ($max_content - $current_line_vis))
                 $spaces = " " * $pad
                 $line_content = $current_line_items -join ""
                 $lines += "${FG_GRAY}│${R} ${line_content}${spaces} ${FG_GRAY}│${R}"
             }
             $stripped_item = Strip-Separator $item
             $stripped_vis = visible_len $stripped_item
+            if ($stripped_vis -gt $max_content) {
+                $stripped_item = $stripped_item -replace '\x1b\[[0-9;]*m', ''
+                if ($max_content -gt 3) {
+                    $stripped_item = $stripped_item.Substring(0, $max_content - 3) + "..."
+                } else {
+                    $stripped_item = $stripped_item.Substring(0, $max_content)
+                }
+                $stripped_vis = visible_len $stripped_item
+            }
             $current_line_items = @($stripped_item)
             $current_line_vis = $stripped_vis
         }
     }
     
     if ($current_line_items.Length -gt 0) {
-        $pad = $max_content - $current_line_vis
+        $pad = [Math]::Max(0, ($max_content - $current_line_vis))
         $spaces = " " * $pad
         $line_content = $current_line_items -join ""
         $lines += "${FG_GRAY}│${R} ${line_content}${spaces} ${FG_GRAY}│${R}"
@@ -851,4 +874,7 @@ $out4 = Format-BoxLine $L3_LEFT $L3_RIGHT $width
 $out5 = Format-BoxLine $L4_LEFT $L4_RIGHT $width
 $out6 = $bottom_border
 "${out1}`n${out2}`n${out3}`n${out4}`n${out5}`n${out6}"
+} catch {
+    exit 0
+}
 
