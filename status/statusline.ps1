@@ -1,5 +1,7 @@
 # Disable progress bar to speed up web requests or execution if any
 $ProgressPreference = 'SilentlyContinue'
+$ErrorActionPreference = 'SilentlyContinue'
+$global:LASTEXITCODE = 0
 
 # Set Output Encoding to UTF-8 to support nerd font icons on Windows
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
@@ -42,7 +44,8 @@ foreach ($arg in $args) {
         
         Write-Host "`nTIPS:" -ForegroundColor White
         Write-Host "  To toggle Classic Icon mode, use the -classic or --classic option in settings.json configuration."
-        exit
+        $global:LASTEXITCODE = 0
+        exit 0
     }
 }
 
@@ -66,7 +69,6 @@ $STATE = if ($data.agent_state) { $data.agent_state } else { "idle" }
 $USED_PCT = if ($data.context_window.used_percentage -ne $null) { $data.context_window.used_percentage } else { 0 }
 $VCS_BRANCH = if ($data.vcs.branch) { $data.vcs.branch } else { "" }
 $VCS_DIRTY = if ($data.vcs.dirty -ne $null) { $data.vcs.dirty } else { $false }
-$VCS_TYPE = if ($data.vcs.type) { $data.vcs.type } else { "" }
 $SANDBOX = if ($data.sandbox.enabled -ne $null) { $data.sandbox.enabled } else { $false }
 $SANDBOX_NET = if ($data.sandbox.allow_network -ne $null) { $data.sandbox.allow_network } else { $false }
 $ARTIFACTS = if ($data.artifact_count -ne $null) { $data.artifact_count } else { 0 }
@@ -87,7 +89,6 @@ $INPUT_TOKENS = if ($data.context_window.total_input_tokens -ne $null) { $data.c
 $OUTPUT_TOKENS = if ($data.context_window.total_output_tokens -ne $null) { $data.context_window.total_output_tokens } else { 0 }
 $CTX_LIMIT = if ($data.context_window.context_window_size -ne $null) { $data.context_window.context_window_size } else { 0 }
 $CTX_USED = $INPUT_TOKENS + $OUTPUT_TOKENS
-$REM_PCT = if ($data.context_window.remaining_percentage -ne $null) { $data.context_window.remaining_percentage } else { 100 }
 
 # Quotas
 $GEMINI_5H = if ($data.quota.'gemini-5h'.remaining_fraction -ne $null) { [Math]::Round($data.quota.'gemini-5h'.remaining_fraction * 100, 1) } else { -1 }
@@ -126,7 +127,6 @@ $FG_BRIGHT_CYAN = "$ESC[96m"
 $FG_BRIGHT_WHITE = "$ESC[97m"
 
 $NUM_COLOR = "${FG_BRIGHT_WHITE}${B}"
-$DOT = "${FG_GRAY} | ${R}"
 
 # Timeout Process Helper
 function Run-WithTimeout {
@@ -155,21 +155,27 @@ function Run-WithTimeout {
             }
         }
     } catch {}
+    finally {
+        if ($proc) {
+            try { $proc.Dispose() } catch {}
+        }
+    }
     return $null
 }
 
-# VCS directly from git (Bypasses JSON caches)
-$GIT_DIR = if ($CWD) { $CWD } else { "." }
-if (Test-Path "$GIT_DIR") {
-    $gitBranch = Run-WithTimeout -Command "git" -Arguments @("-C", "`"$GIT_DIR`"", "rev-parse", "--abbrev-ref", "HEAD")
-    if ($gitBranch) {
-        $VCS_BRANCH = $gitBranch.Trim()
-        $VCS_TYPE = "git"
-        $status = Run-WithTimeout -Command "git" -Arguments @("-C", "`"$GIT_DIR`"", "status", "--porcelain")
-        if ($status) {
-            $VCS_DIRTY = $true
-        } else {
-            $VCS_DIRTY = $false
+# VCS: Only query git directly if JSON payload didn't provide branch info
+if (-not $VCS_BRANCH) {
+    $GIT_DIR = if ($CWD) { $CWD.TrimEnd('\', '/') } else { "." }
+    if (Test-Path "$GIT_DIR") {
+        $gitBranch = Run-WithTimeout -Command "git" -Arguments @("-C", "`"$GIT_DIR`"", "rev-parse", "--abbrev-ref", "HEAD") -TimeoutMs 300
+        if ($gitBranch) {
+            $VCS_BRANCH = $gitBranch.Trim()
+            $status = Run-WithTimeout -Command "git" -Arguments @("-C", "`"$GIT_DIR`"", "status", "--porcelain") -TimeoutMs 300
+            if ($status) {
+                $VCS_DIRTY = $true
+            } else {
+                $VCS_DIRTY = $false
+            }
         }
     }
 }
@@ -317,10 +323,12 @@ if ($USE_CLASSIC_ICONS) {
     $ICON_BAT = "🔋"
 }
 
+$script:ANSI_REGEX = [regex]'\x1b\[[0-9;]*m'
+
 function visible_len($str) {
     if (-not $str) { return 0 }
     # Strips ESC sequences and counts visible length
-    $stripped = $str -replace '\x1b\[[0-9;]*m', ''
+    $stripped = $script:ANSI_REGEX.Replace($str, '')
     
     $len = 0
     for ($i = 0; $i -lt $stripped.Length; $i++) {
@@ -380,24 +388,13 @@ if ($PLAN_TIER -or $USER_EMAIL) {
     }
 }
 
-# Get hostname and Tailscale IP
+# Get hostname
 $HOST_NAME = ""
 try { $HOST_NAME = [System.Net.Dns]::GetHostName() } catch {}
-$TS_IP = ""
-try {
-    if (Get-Command tailscale -ErrorAction SilentlyContinue) {
-        $tsStatus = tailscale ip -4 2>$null
-        if ($tsStatus) { $TS_IP = ($tsStatus | Out-String).Trim() }
-    }
-} catch {}
 
 $HOST_FMT = ""
 if ($HOST_NAME) {
-    $hostDetails = $HOST_NAME
-    if ($TS_IP) {
-        $hostDetails = "${HOST_NAME} (${TS_IP})"
-    }
-    $hostDetails = Truncate-String $hostDetails $max_host_len
+    $hostDetails = Truncate-String $HOST_NAME $max_host_len
     if ($USE_CLASSIC_ICONS) {
         $HOST_FMT = "${DOT_L1}${FG_BRIGHT_BLUE}${hostDetails}${R}"
     } else {
@@ -405,29 +402,41 @@ if ($HOST_NAME) {
     }
 }
 
-# Get Power Status
+# Get Power Status (Integrated Optimization: 1. No-battery flag, 2. 30s TTL cache, 3. Fast query & fallback)
 $POWER_FMT = ""
-try {
-    $battery = Get-CimInstance -ClassName Win32_Battery -ErrorAction SilentlyContinue
-    if ($battery) {
-        $status = $battery.BatteryStatus
-        $cap = $battery.EstimatedChargeRemaining
-        # BatteryStatus 1 = Discharging (on battery)
-        if ($status -eq 1) {
-            if ($USE_CLASSIC_ICONS) {
-                $POWER_FMT = "${DOT_L2}${FG_BRIGHT_YELLOW}${ICON_BAT}:${cap}%${R}"
+if (-not $global:NO_BATTERY_FOUND) {
+    $now = [DateTime]::Now
+    if ($global:BATTERY_CACHE_TIME -and ($now - $global:BATTERY_CACHE_TIME).TotalSeconds -lt 30) {
+        $POWER_FMT = $global:BATTERY_CACHE_FMT
+    } else {
+        try {
+            $battery = Get-CimInstance -ClassName Win32_Battery -Property BatteryStatus, EstimatedChargeRemaining -OperationTimeoutSec 1 -ErrorAction SilentlyContinue
+            if ($battery) {
+                $status = $battery.BatteryStatus
+                $cap = $battery.EstimatedChargeRemaining
+                if ($status -eq 1) {
+                    if ($USE_CLASSIC_ICONS) {
+                        $POWER_FMT = "${DOT_L2}${FG_BRIGHT_YELLOW}${ICON_BAT}:${cap}%${R}"
+                    } else {
+                        $POWER_FMT = "${DOT_L2}${FG_BRIGHT_YELLOW}${ICON_BAT} ${cap}%${R}"
+                    }
+                } else {
+                    if ($USE_CLASSIC_ICONS) {
+                        $POWER_FMT = "${DOT_L2}${FG_GREEN}${ICON_AC}${R}"
+                    } else {
+                        $POWER_FMT = "${DOT_L2}${FG_GREEN}${ICON_AC} AC${R}"
+                    }
+                }
+                $global:BATTERY_CACHE_TIME = $now
+                $global:BATTERY_CACHE_FMT = $POWER_FMT
             } else {
-                $POWER_FMT = "${DOT_L2}${FG_BRIGHT_YELLOW}${ICON_BAT} ${cap}%${R}"
+                $global:NO_BATTERY_FOUND = $true
             }
-        } else {
-            if ($USE_CLASSIC_ICONS) {
-                $POWER_FMT = "${DOT_L2}${FG_GREEN}${ICON_AC}${R}"
-            } else {
-                $POWER_FMT = "${DOT_L2}${FG_GREEN}${ICON_AC} AC${R}"
-            }
+        } catch {
+            $global:NO_BATTERY_FOUND = $true
         }
     }
-} catch {}
+}
 
 # State Indicator
 $S = ""
@@ -536,15 +545,6 @@ if ($USE_CLASSIC_ICONS) {
     $BG_FMT = "${FG_MAGENTA}${ICON_TASKS} ${NUM_COLOR}${BG_TASKS}${R}"
 }
 
-$DIR_FMT = ""
-if ($CWD_SHORT) {
-    if ($USE_CLASSIC_ICONS) {
-        $DIR_FMT = "${DOT_L1}${FG_CYAN}${CWD_SHORT}${R}"
-    } else {
-        $DIR_FMT = "${DOT_L1}${FG_CYAN}${ICON_DIR} ${CWD_SHORT}${R}"
-    }
-}
-
 $CONV_FMT = ""
 if ($CONV_ID) {
     $short_conv = $CONV_ID.Substring(0, [Math]::Min(8, $CONV_ID.Length))
@@ -556,7 +556,6 @@ if ($CONV_ID) {
 }
 
 $TOK_DETAILS_WIDE = ""
-$TOK_DETAILS_MED = ""
 if ($CTX_USED -gt 0) {
     $turnStr = ""
     if ($TURN_INPUT_TOKENS -gt 0 -or $TURN_OUTPUT_TOKENS -gt 0) {
@@ -564,10 +563,8 @@ if ($CTX_USED -gt 0) {
     }
     if ($USE_CLASSIC_ICONS) {
         $TOK_DETAILS_WIDE = " (${CTX_USED_FMT}/${CTX_LIMIT_FMT})${DOT_L2}(total: ${INPUT_TOK_FMT}/${OUTPUT_TOK_FMT}${turnStr})"
-        $TOK_DETAILS_MED = " (${CTX_USED_FMT}/${CTX_LIMIT_FMT})"
     } else {
         $TOK_DETAILS_WIDE = " (${CTX_USED_FMT}/${CTX_LIMIT_FMT})${DOT_L2}${FG_YELLOW}${ICON_TOK_SUM} ${R} (total: ${INPUT_TOK_FMT}/${OUTPUT_TOK_FMT}${turnStr})"
-        $TOK_DETAILS_MED = " (${CTX_USED_FMT}/${CTX_LIMIT_FMT})"
     }
 }
 
@@ -704,15 +701,7 @@ if ($isGeminiModel) {
 $Q_5H_FMT = if (($Q_5H -ne $null -and $Q_5H -ne -1)) { make_quota_bar $Q_5H "5H" $FG_BRIGHT_CYAN $Q_5H_R } else { "" }
 $Q_WK_FMT = if (($Q_WK -ne $null -and $Q_WK -ne -1)) { make_quota_bar $Q_WK "7D" $FG_BRIGHT_MAGENTA $Q_WK_R } else { "" }
 
-# Right-align helper
-function print_right_aligned($left, $right, $total_cols) {
-    $left_vis = visible_len $left
-    $right_vis = visible_len $right
-    $pad = $total_cols - $left_vis - $right_vis
-    if ($pad -lt 1) { $pad = 1 }
-    $spaces = " " * $pad
-    return "${left}${spaces}${right}"
-}
+
 
 # Output Assembly based on Column Width (Always 4 lines to prevent terminal jumping)
 $width = $COLS
@@ -874,7 +863,9 @@ $out4 = Format-BoxLine $L3_LEFT $L3_RIGHT $width
 $out5 = Format-BoxLine $L4_LEFT $L4_RIGHT $width
 $out6 = $bottom_border
 "${out1}`n${out2}`n${out3}`n${out4}`n${out5}`n${out6}"
+$global:LASTEXITCODE = 0
+exit 0
 } catch {
+    $global:LASTEXITCODE = 0
     exit 0
 }
-
