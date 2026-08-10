@@ -3,67 +3,68 @@ $ProgressPreference = 'SilentlyContinue'
 $ErrorActionPreference = 'SilentlyContinue'
 $global:LASTEXITCODE = 0
 
-# Set Output Encoding to UTF-8 to support nerd font icons on Windows
-[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+try {
+    # Set Output Encoding to UTF-8 to support nerd font icons on Windows
+    try { [Console]::OutputEncoding = [System.Text.Encoding]::UTF8 } catch {}
 
-# Check for legend parameter before reading stdin
-foreach ($arg in $args) {
-    if ($arg -eq "--legend" -or $arg -eq "-l" -or $arg -eq "-Legend" -or $arg -eq "legend") {
-        Write-Host "🚀 Antigravity CLI Statusline Legend" -ForegroundColor Green
-        Write-Host "This statusline adapts dynamically to your terminal width and theme settings.`n"
-        
-        Write-Host "LAYOUTS:" -ForegroundColor White
-        Write-Host "  - Wide Layout (>= 180 chars): Single-row, full developer telemetry dashboard."
-        Write-Host "  - Medium Layout (>= 90 chars): Two-line boxed block to prevent line wrap."
-        Write-Host "  - Small Layout (< 90 chars): Minimalist indicator for status, model, context & tasks.`n"
-        
-        Write-Host "COMPONENTS & ICONS:" -ForegroundColor White
-        Write-Host "  Field                Nerd Font   Classic     Description" -ForegroundColor White
-        Write-Host "  --------------------------------------------------------------------------------"
-        
-        Write-Host "  State: READY         " -NoNewline; Write-Host "           " -ForegroundColor Green -NoNewline; Write-Host "●           " -ForegroundColor Green -NoNewline; Write-Host "Agent is idle, ready for user requests."
-        Write-Host "  State: THINKING      " -NoNewline; Write-Host "󰟷           " -ForegroundColor Yellow -NoNewline; Write-Host "◆           " -ForegroundColor Yellow -NoNewline; Write-Host "Agent is processing/thinking."
-        Write-Host "  State: WORKING       " -NoNewline; Write-Host "           " -ForegroundColor Cyan -NoNewline; Write-Host "⚙           " -ForegroundColor Cyan -NoNewline; Write-Host "Agent is executing background operations."
-        Write-Host "  State: TOOL          " -NoNewline; Write-Host "           " -ForegroundColor Magenta -NoNewline; Write-Host "🔧          " -ForegroundColor Magenta -NoNewline; Write-Host "Agent is running a tool."
-        Write-Host "  State: UNKNOWN       " -NoNewline; Write-Host "           " -ForegroundColor White -NoNewline; Write-Host "⏳          " -ForegroundColor White -NoNewline; Write-Host "Agent state is unknown or initializing."
-        Write-Host "  VCS Branch           " -NoNewline; Write-Host "           " -ForegroundColor Blue -NoNewline; Write-Host "/           " -ForegroundColor Gray -NoNewline; Write-Host "Current Git branch name (Red + * if dirty)."
-        Write-Host "  Model                " -NoNewline; Write-Host "           " -ForegroundColor Magenta -NoNewline; Write-Host "(None)      " -ForegroundColor DarkGray -NoNewline; Write-Host "Current active LLM model name/ID."
-        Write-Host "  Sandbox Network      " -NoNewline; Write-Host "󰒙           " -ForegroundColor Green -NoNewline; Write-Host "ON (net)    " -ForegroundColor Green -NoNewline; Write-Host "Sandbox enabled with internet access."
-        Write-Host "  Sandbox Restricted   " -NoNewline; Write-Host "󰴴           " -ForegroundColor Green -NoNewline; Write-Host "ON (no-net) " -ForegroundColor Green -NoNewline; Write-Host "Sandbox enabled with network disabled."
-        Write-Host "  Sandbox Off          " -NoNewline; Write-Host "󰦜           " -ForegroundColor Red -NoNewline; Write-Host "sandbox off " -ForegroundColor Gray -NoNewline; Write-Host "Sandbox is disabled (runs on host)."
-        Write-Host "  Context Bar          " -NoNewline; Write-Host "󱍏           " -ForegroundColor Yellow -NoNewline; Write-Host "ctx         " -ForegroundColor Gray -NoNewline; Write-Host "20-segment visual context window usage bar."
-        Write-Host "  Artifacts            " -NoNewline; Write-Host "           " -ForegroundColor Blue -NoNewline; Write-Host "artifacts   " -ForegroundColor Gray -NoNewline; Write-Host "Number of active output artifacts."
-        Write-Host "  Subagents            " -NoNewline; Write-Host "󱙺           " -ForegroundColor Cyan -NoNewline; Write-Host "subagents   " -ForegroundColor Gray -NoNewline; Write-Host "Number of spawned active subagents."
-        Write-Host "  Background Tasks     " -NoNewline; Write-Host "           " -ForegroundColor Magenta -NoNewline; Write-Host "tasks       " -ForegroundColor Gray -NoNewline; Write-Host "Number of background tasks running."
-        Write-Host "  Current Directory    " -NoNewline; Write-Host "           " -ForegroundColor Cyan -NoNewline; Write-Host "/           " -ForegroundColor Gray -NoNewline; Write-Host "Current working directory path (shortened)."
-        Write-Host "  Conversation ID      " -NoNewline; Write-Host "󰍪           " -ForegroundColor Gray -NoNewline; Write-Host "/           " -ForegroundColor Gray -NoNewline; Write-Host "Short prefix of the current session ID."
-        Write-Host "  Tokens Sum           " -NoNewline; Write-Host "           " -ForegroundColor Yellow -NoNewline; Write-Host "(None)      " -ForegroundColor DarkGray -NoNewline; Write-Host "Total input/output tokens parsed."
-        Write-Host "  Quota Reset Time     " -NoNewline; Write-Host "⌛️          " -ForegroundColor Gray -NoNewline; Write-Host "⌛          " -ForegroundColor Gray -NoNewline; Write-Host "Remaining time until LLM quota resets."
-        Write-Host "  Power Mains (AC)     " -NoNewline; Write-Host "󰚥           " -ForegroundColor Green -NoNewline; Write-Host "AC          " -ForegroundColor Green -NoNewline; Write-Host "Host is connected to external AC power."
-        Write-Host "  Power Battery (UPS)  " -NoNewline; Write-Host "🔋           " -ForegroundColor Yellow -NoNewline; Write-Host "BAT         " -ForegroundColor Yellow -NoNewline; Write-Host "Host is running on battery (shows charge %)."
-        
-        Write-Host "`nTIPS:" -ForegroundColor White
-        Write-Host "  To toggle Classic Icon mode, use the -classic or --classic option in settings.json configuration."
+    # Check for legend parameter before reading stdin
+    foreach ($arg in $args) {
+        if ($arg -eq "--legend" -or $arg -eq "-l" -or $arg -eq "-Legend" -or $arg -eq "legend") {
+            Write-Host "🚀 Antigravity CLI Statusline Legend" -ForegroundColor Green
+            Write-Host "This statusline adapts dynamically to your terminal width and theme settings.`n"
+            
+            Write-Host "LAYOUTS:" -ForegroundColor White
+            Write-Host "  - Wide Layout (>= 180 chars): Single-row, full developer telemetry dashboard."
+            Write-Host "  - Medium Layout (>= 90 chars): Two-line boxed block to prevent line wrap."
+            Write-Host "  - Small Layout (< 90 chars): Minimalist indicator for status, model, context & tasks.`n"
+            
+            Write-Host "COMPONENTS & ICONS:" -ForegroundColor White
+            Write-Host "  Field                Nerd Font   Classic     Description" -ForegroundColor White
+            Write-Host "  --------------------------------------------------------------------------------"
+            
+            Write-Host "  State: READY         " -NoNewline; Write-Host "           " -ForegroundColor Green -NoNewline; Write-Host "●           " -ForegroundColor Green -NoNewline; Write-Host "Agent is idle, ready for user requests."
+            Write-Host "  State: THINKING      " -NoNewline; Write-Host "󰟷           " -ForegroundColor Yellow -NoNewline; Write-Host "◆           " -ForegroundColor Yellow -NoNewline; Write-Host "Agent is processing/thinking."
+            Write-Host "  State: WORKING       " -NoNewline; Write-Host "           " -ForegroundColor Cyan -NoNewline; Write-Host "⚙           " -ForegroundColor Cyan -NoNewline; Write-Host "Agent is executing background operations."
+            Write-Host "  State: TOOL          " -NoNewline; Write-Host "           " -ForegroundColor Magenta -NoNewline; Write-Host "🔧          " -ForegroundColor Magenta -NoNewline; Write-Host "Agent is running a tool."
+            Write-Host "  State: UNKNOWN       " -NoNewline; Write-Host "           " -ForegroundColor White -NoNewline; Write-Host "⏳          " -ForegroundColor White -NoNewline; Write-Host "Agent state is unknown or initializing."
+            Write-Host "  VCS Branch           " -NoNewline; Write-Host "           " -ForegroundColor Blue -NoNewline; Write-Host "/           " -ForegroundColor Gray -NoNewline; Write-Host "Current Git branch name (Red + * if dirty)."
+            Write-Host "  Model                " -NoNewline; Write-Host "           " -ForegroundColor Magenta -NoNewline; Write-Host "(None)      " -ForegroundColor DarkGray -NoNewline; Write-Host "Current active LLM model name/ID."
+            Write-Host "  Sandbox Network      " -NoNewline; Write-Host "󰒙           " -ForegroundColor Green -NoNewline; Write-Host "ON (net)    " -ForegroundColor Green -NoNewline; Write-Host "Sandbox enabled with internet access."
+            Write-Host "  Sandbox Restricted   " -NoNewline; Write-Host "󰴴           " -ForegroundColor Green -NoNewline; Write-Host "ON (no-net) " -ForegroundColor Green -NoNewline; Write-Host "Sandbox enabled with network disabled."
+            Write-Host "  Sandbox Off          " -NoNewline; Write-Host "󰦜           " -ForegroundColor Red -NoNewline; Write-Host "sandbox off " -ForegroundColor Gray -NoNewline; Write-Host "Sandbox is disabled (runs on host)."
+            Write-Host "  Context Bar          " -NoNewline; Write-Host "󱍏           " -ForegroundColor Yellow -NoNewline; Write-Host "ctx         " -ForegroundColor Gray -NoNewline; Write-Host "20-segment visual context window usage bar."
+            Write-Host "  Artifacts            " -NoNewline; Write-Host "           " -ForegroundColor Blue -NoNewline; Write-Host "artifacts   " -ForegroundColor Gray -NoNewline; Write-Host "Number of active output artifacts."
+            Write-Host "  Subagents            " -NoNewline; Write-Host "󱙺           " -ForegroundColor Cyan -NoNewline; Write-Host "subagents   " -ForegroundColor Gray -NoNewline; Write-Host "Number of spawned active subagents."
+            Write-Host "  Background Tasks     " -NoNewline; Write-Host "           " -ForegroundColor Magenta -NoNewline; Write-Host "tasks       " -ForegroundColor Gray -NoNewline; Write-Host "Number of background tasks running."
+            Write-Host "  Current Directory    " -NoNewline; Write-Host "           " -ForegroundColor Cyan -NoNewline; Write-Host "/           " -ForegroundColor Gray -NoNewline; Write-Host "Current working directory path (shortened)."
+            Write-Host "  Conversation ID      " -NoNewline; Write-Host "󰍪           " -ForegroundColor Gray -NoNewline; Write-Host "/           " -ForegroundColor Gray -NoNewline; Write-Host "Short prefix of the current session ID."
+            Write-Host "  Tokens Sum           " -NoNewline; Write-Host "           " -ForegroundColor Yellow -NoNewline; Write-Host "(None)      " -ForegroundColor DarkGray -NoNewline; Write-Host "Total input/output tokens parsed."
+            Write-Host "  Quota Reset Time     " -NoNewline; Write-Host "⌛️          " -ForegroundColor Gray -NoNewline; Write-Host "⌛          " -ForegroundColor Gray -NoNewline; Write-Host "Remaining time until LLM quota resets."
+            Write-Host "  Power Mains (AC)     " -NoNewline; Write-Host "󰚥           " -ForegroundColor Green -NoNewline; Write-Host "AC          " -ForegroundColor Green -NoNewline; Write-Host "Host is connected to external AC power."
+            Write-Host "  Power Battery (UPS)  " -NoNewline; Write-Host "🔋           " -ForegroundColor Yellow -NoNewline; Write-Host "BAT         " -ForegroundColor Yellow -NoNewline; Write-Host "Host is running on battery (shows charge %)."
+            
+            Write-Host "`nTIPS:" -ForegroundColor White
+            Write-Host "  To toggle Classic Icon mode, use the -classic or --classic option in settings.json configuration."
+            $global:LASTEXITCODE = 0
+            exit 0
+        }
+    }
+
+    # Read JSON input from stdin
+    $inputJson = $input | Out-String
+    if (-not $inputJson -or $inputJson.Trim().Length -eq 0) {
         $global:LASTEXITCODE = 0
         exit 0
     }
-}
 
-# Read JSON input from stdin
-$inputJson = $input | Out-String
-if (-not $inputJson -or $inputJson.Trim().Length -eq 0) {
-    # If no stdin, output nothing and exit
-    exit 0
-}
+    # Parse JSON safely
+    try {
+        $data = ConvertFrom-Json $inputJson
+    } catch {
+        $global:LASTEXITCODE = 0
+        exit 0
+    }
 
-# Parse JSON safely
-try {
-    $data = ConvertFrom-Json $inputJson
-} catch {
-    exit 0
-}
-
-try {
 # Extract properties with fallbacks
 $STATE = if ($data.agent_state) { $data.agent_state } else { "idle" }
 $USED_PCT = if ($data.context_window.used_percentage -ne $null) { $data.context_window.used_percentage } else { 0 }
@@ -402,39 +403,55 @@ if ($HOST_NAME) {
     }
 }
 
-# Get Power Status (Integrated Optimization: 1. No-battery flag, 2. 30s TTL cache, 3. Fast query & fallback)
+# Get Power Status (Integrated Fast Power API Query)
 $POWER_FMT = ""
-if (-not $global:NO_BATTERY_FOUND) {
-    $now = [DateTime]::Now
-    if ($global:BATTERY_CACHE_TIME -and ($now - $global:BATTERY_CACHE_TIME).TotalSeconds -lt 30) {
-        $POWER_FMT = $global:BATTERY_CACHE_FMT
-    } else {
-        try {
-            $battery = Get-CimInstance -ClassName Win32_Battery -Property BatteryStatus, EstimatedChargeRemaining -OperationTimeoutSec 1 -ErrorAction SilentlyContinue
-            if ($battery) {
-                $status = $battery.BatteryStatus
-                $cap = $battery.EstimatedChargeRemaining
-                if ($status -eq 1) {
-                    if ($USE_CLASSIC_ICONS) {
-                        $POWER_FMT = "${DOT_L2}${FG_BRIGHT_YELLOW}${ICON_BAT}:${cap}%${R}"
-                    } else {
-                        $POWER_FMT = "${DOT_L2}${FG_BRIGHT_YELLOW}${ICON_BAT} ${cap}%${R}"
-                    }
-                } else {
-                    if ($USE_CLASSIC_ICONS) {
-                        $POWER_FMT = "${DOT_L2}${FG_GREEN}${ICON_AC}${R}"
-                    } else {
-                        $POWER_FMT = "${DOT_L2}${FG_GREEN}${ICON_AC} AC${R}"
-                    }
-                }
-                $global:BATTERY_CACHE_TIME = $now
-                $global:BATTERY_CACHE_FMT = $POWER_FMT
+try {
+    # Method 1: Ultra-fast SystemPowerStatus via .NET/Win32 API (0ms overhead)
+    Add-Type -Assembly "System.Windows.Forms" -ErrorAction SilentlyContinue
+    $p = [System.Windows.Forms.SystemInformation]::PowerStatus
+    if ($p) {
+        $chargePct = [int]($p.BatteryLifePercent * 100)
+        $lineStatus = $p.PowerLineStatus
+        if ($lineStatus -eq "Offline" -or ($chargePct -lt 100 -and $chargePct -gt 0 -and $lineStatus -ne "Online")) {
+            if ($USE_CLASSIC_ICONS) {
+                $POWER_FMT = "${DOT_L2}${FG_BRIGHT_YELLOW}${ICON_BAT}:${chargePct}%${R}"
             } else {
-                $global:NO_BATTERY_FOUND = $true
+                $POWER_FMT = "${DOT_L2}${FG_BRIGHT_YELLOW}${ICON_BAT} ${chargePct}%${R}"
             }
-        } catch {
-            $global:NO_BATTERY_FOUND = $true
+        } else {
+            if ($USE_CLASSIC_ICONS) {
+                $POWER_FMT = "${DOT_L2}${FG_GREEN}${ICON_AC}${R}"
+            } else {
+                $POWER_FMT = "${DOT_L2}${FG_GREEN}${ICON_AC} AC${R}"
+            }
         }
+    }
+} catch {}
+
+if (-not $POWER_FMT -and -not $script:NO_BATTERY_FOUND) {
+    try {
+        $battery = Get-CimInstance -ClassName Win32_Battery -Property BatteryStatus, EstimatedChargeRemaining -OperationTimeoutSec 1 -ErrorAction SilentlyContinue
+        if ($battery) {
+            $status = $battery.BatteryStatus
+            $cap = $battery.EstimatedChargeRemaining
+            if ($status -eq 1) {
+                if ($USE_CLASSIC_ICONS) {
+                    $POWER_FMT = "${DOT_L2}${FG_BRIGHT_YELLOW}${ICON_BAT}:${cap}%${R}"
+                } else {
+                    $POWER_FMT = "${DOT_L2}${FG_BRIGHT_YELLOW}${ICON_BAT} ${cap}%${R}"
+                }
+            } else {
+                if ($USE_CLASSIC_ICONS) {
+                    $POWER_FMT = "${DOT_L2}${FG_GREEN}${ICON_AC}${R}"
+                } else {
+                    $POWER_FMT = "${DOT_L2}${FG_GREEN}${ICON_AC} AC${R}"
+                }
+            }
+        } else {
+            $script:NO_BATTERY_FOUND = $true
+        }
+    } catch {
+        $script:NO_BATTERY_FOUND = $true
     }
 }
 
