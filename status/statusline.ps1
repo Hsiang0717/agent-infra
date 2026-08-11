@@ -4,6 +4,21 @@ $ErrorActionPreference = 'SilentlyContinue'
 $global:LASTEXITCODE = 0
 
 try {
+    Import-Module (Join-Path $PSScriptRoot 'Status.Git.psm1') -Force -ErrorAction Stop
+    Import-Module (Join-Path $PSScriptRoot 'Status.Power.psm1') -Force -ErrorAction Stop
+
+    $SHOW_LEGEND = $args | Where-Object { $_ -in @('--legend', '-l', 'legend') }
+    if ($SHOW_LEGEND) {
+        Write-Output 'Antigravity Statusline Legend'
+        Write-Output 'READY     Agent is idle'
+        Write-Output 'THINKING  Agent is reasoning'
+        Write-Output 'WORKING   Agent is executing'
+        Write-Output 'TOOL      Tool call is active'
+        Write-Output 'CTX       Context window usage'
+        Write-Output '5H / 7D   Quota remaining and reset time'
+        exit 0
+    }
+
     # Set Output Encoding to UTF-8 to support nerd font icons on Windows
     try { [Console]::OutputEncoding = [System.Text.Encoding]::UTF8 } catch {}
 
@@ -46,57 +61,82 @@ function Safe-Double([object]$val, [double]$default = 0.0) {
     return $default
 }
 
+function Clamp-Double([double]$val, [double]$min, [double]$max) {
+    if ([double]::IsNaN($val) -or [double]::IsInfinity($val)) { return $min }
+    return [Math]::Max($min, [Math]::Min($max, $val))
+}
+
+function Safe-Bool([object]$val, [bool]$default = $false) {
+    if ($val -is [bool]) { return [bool]$val }
+    if ($val -eq $null) { return $default }
+    $parsed = $false
+    if ([bool]::TryParse(([string]$val).Trim(), [ref]$parsed)) { return $parsed }
+    return $default
+}
+
+function Clean-DisplayText([object]$val, [int]$maxLen = 0) {
+    if ($val -eq $null) { return "" }
+    # Remove terminal control characters and ANSI CSI sequences from JSON/env data.
+    $text = ([string]$val) -replace '\x1b\[[0-?]*[ -/]*[@-~]', ''
+    $text = $text -replace '[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]', ''
+    if ($maxLen -gt 0 -and $text.Length -gt $maxLen) {
+        if ($maxLen -le 3) { return $text.Substring(0, $maxLen) }
+        return $text.Substring(0, $maxLen - 3) + '...'
+    }
+    return $text
+}
+
 function Safe-Quota([object]$quotaObj) {
     if ($quotaObj -eq $null -or $quotaObj.remaining_fraction -eq $null) { return -1 }
     $val = Safe-Double $quotaObj.remaining_fraction -999.0
     if ($val -eq -999.0 -or $val -lt 0) { return -1 }
-    return [Math]::Round($val * 100, 1)
+    return [Math]::Round((Clamp-Double ($val * 100) 0 100), 1)
 }
 
 # Extract properties with fallbacks
-$STATE = if ($data -and $data.agent_state) { $data.agent_state } else { "idle" }
+$STATE = if ($data -and $data.agent_state) { Clean-DisplayText $data.agent_state 16 } else { "idle" }
 $usedPctVal = 0.0
 if ($data -and $data.context_window -and $data.context_window.used_percentage -ne $null) {
     $usedPctVal = $data.context_window.used_percentage
 }
-$USED_PCT = Safe-Double $usedPctVal 0.0
+$USED_PCT = Clamp-Double (Safe-Double $usedPctVal 0.0) 0 100
 
-$VCS_BRANCH = if ($data -and $data.vcs -and $data.vcs.branch) { $data.vcs.branch } else { "" }
-$VCS_DIRTY = if ($data -and $data.vcs -and $data.vcs.dirty -ne $null) { $data.vcs.dirty } else { $false }
-$SANDBOX = if ($data -and $data.sandbox -and $data.sandbox.enabled -ne $null) { $data.sandbox.enabled } else { $false }
-$SANDBOX_NET = if ($data -and $data.sandbox -and $data.sandbox.allow_network -ne $null) { $data.sandbox.allow_network } else { $false }
-$ARTIFACTS = if ($data -and $data.artifact_count -ne $null) { $data.artifact_count } else { 0 }
+$VCS_BRANCH = if ($data -and $data.vcs -and $data.vcs.branch) { Clean-DisplayText $data.vcs.branch 80 } else { "" }
+$VCS_DIRTY = if ($data -and $data.vcs -and $data.vcs.dirty -ne $null) { Safe-Bool $data.vcs.dirty } else { $false }
+$SANDBOX = if ($data -and $data.sandbox -and $data.sandbox.enabled -ne $null) { Safe-Bool $data.sandbox.enabled } else { $false }
+$SANDBOX_NET = if ($data -and $data.sandbox -and $data.sandbox.allow_network -ne $null) { Safe-Bool $data.sandbox.allow_network } else { $false }
+$ARTIFACTS = if ($data -and $data.artifact_count -ne $null) { [Math]::Max(0, [int](Safe-Double $data.artifact_count 0)) } else { 0 }
 $SUBAGENTS = if ($data -and $data.subagents -and $data.subagents.GetType().IsArray) { $data.subagents.Length } else { 0 }
-$BG_TASKS = if ($data -and $data.task_count -ne $null) { $data.task_count } else { 0 }
-$MODEL_ID = if ($data -and $data.model -and $data.model.id) { $data.model.id } else { "" }
-$MODEL_NAME = if ($data -and $data.model -and $data.model.display_name) { $data.model.display_name } else { "" }
-$COLS = if ($data -and $data.terminal_width -ne $null) { $data.terminal_width } else { 80 }
-$CWD = if ($data -and $data.cwd) { $data.cwd } else { "" }
-$CONV_ID = if ($data -and $data.conversation_id) { $data.conversation_id } else { "" }
-$CLI_VERSION = if ($data -and $data.version) { $data.version } else { "" }
-$PLAN_TIER = if ($data -and $data.plan_tier) { $data.plan_tier } else { "" }
-$USER_EMAIL = if ($data -and $data.email) { $data.email } else { "" }
+$BG_TASKS = if ($data -and $data.task_count -ne $null) { [Math]::Max(0, [int](Safe-Double $data.task_count 0)) } else { 0 }
+$MODEL_ID = if ($data -and $data.model -and $data.model.id) { Clean-DisplayText $data.model.id 80 } else { "" }
+$MODEL_NAME = if ($data -and $data.model -and $data.model.display_name) { Clean-DisplayText $data.model.display_name 80 } else { "" }
+$COLS = if ($data -and $data.terminal_width -ne $null) { [int](Clamp-Double (Safe-Double $data.terminal_width 80) 20 400) } else { 80 }
+$CWD = if ($data -and $data.cwd) { Clean-DisplayText $data.cwd 260 } else { "" }
+$CONV_ID = if ($data -and $data.conversation_id) { Clean-DisplayText $data.conversation_id 80 } else { "" }
+$CLI_VERSION = if ($data -and $data.version) { Clean-DisplayText $data.version 32 } else { "" }
+$PLAN_TIER = if ($data -and $data.plan_tier) { Clean-DisplayText $data.plan_tier 32 } else { "" }
+$USER_EMAIL = if ($data -and $data.email) { Clean-DisplayText $data.email 120 } else { "" }
 
 $TURN_INPUT_TOKENS = 0
 if ($data -and $data.context_window -and $data.context_window.current_usage -and $data.context_window.current_usage.input_tokens -ne $null) {
-    $TURN_INPUT_TOKENS = $data.context_window.current_usage.input_tokens
+    $TURN_INPUT_TOKENS = [Math]::Max(0, [int](Safe-Double $data.context_window.current_usage.input_tokens 0))
 }
 $TURN_OUTPUT_TOKENS = 0
 if ($data -and $data.context_window -and $data.context_window.current_usage -and $data.context_window.current_usage.output_tokens -ne $null) {
-    $TURN_OUTPUT_TOKENS = $data.context_window.current_usage.output_tokens
+    $TURN_OUTPUT_TOKENS = [Math]::Max(0, [int](Safe-Double $data.context_window.current_usage.output_tokens 0))
 }
 
 $INPUT_TOKENS = 0
 if ($data -and $data.context_window -and $data.context_window.total_input_tokens -ne $null) {
-    $INPUT_TOKENS = $data.context_window.total_input_tokens
+    $INPUT_TOKENS = [Math]::Max(0, [int](Safe-Double $data.context_window.total_input_tokens 0))
 }
 $OUTPUT_TOKENS = 0
 if ($data -and $data.context_window -and $data.context_window.total_output_tokens -ne $null) {
-    $OUTPUT_TOKENS = $data.context_window.total_output_tokens
+    $OUTPUT_TOKENS = [Math]::Max(0, [int](Safe-Double $data.context_window.total_output_tokens 0))
 }
 $CTX_LIMIT = 0
 if ($data -and $data.context_window -and $data.context_window.context_window_size -ne $null) {
-    $CTX_LIMIT = $data.context_window.context_window_size
+    $CTX_LIMIT = [Math]::Max(0, [int](Safe-Double $data.context_window.context_window_size 0))
 }
 $CTX_USED = $INPUT_TOKENS + $OUTPUT_TOKENS
 
@@ -106,10 +146,10 @@ $GEMINI_WK = Safe-Quota $data.quota.'gemini-weekly'
 $TP_5H = Safe-Quota $data.quota.'3p-5h'
 $TP_WK = Safe-Quota $data.quota.'3p-weekly'
 
-$GEMINI_5H_RESET = if ($data -and $data.quota -and $data.quota.'gemini-5h' -and $data.quota.'gemini-5h'.reset_in_seconds -ne $null) { $data.quota.'gemini-5h'.reset_in_seconds } else { -1 }
-$GEMINI_WK_RESET = if ($data -and $data.quota -and $data.quota.'gemini-weekly' -and $data.quota.'gemini-weekly'.reset_in_seconds -ne $null) { $data.quota.'gemini-weekly'.reset_in_seconds } else { -1 }
-$TP_5H_RESET = if ($data -and $data.quota -and $data.quota.'3p-5h' -and $data.quota.'3p-5h'.reset_in_seconds -ne $null) { $data.quota.'3p-5h'.reset_in_seconds } else { -1 }
-$TP_WK_RESET = if ($data -and $data.quota -and $data.quota.'3p-weekly' -and $data.quota.'3p-weekly'.reset_in_seconds -ne $null) { $data.quota.'3p-weekly'.reset_in_seconds } else { -1 }
+$GEMINI_5H_RESET = if ($data -and $data.quota -and $data.quota.'gemini-5h' -and $data.quota.'gemini-5h'.reset_in_seconds -ne $null) { [Math]::Max(0, [int](Safe-Double $data.quota.'gemini-5h'.reset_in_seconds 0)) } else { -1 }
+$GEMINI_WK_RESET = if ($data -and $data.quota -and $data.quota.'gemini-weekly' -and $data.quota.'gemini-weekly'.reset_in_seconds -ne $null) { [Math]::Max(0, [int](Safe-Double $data.quota.'gemini-weekly'.reset_in_seconds 0)) } else { -1 }
+$TP_5H_RESET = if ($data -and $data.quota -and $data.quota.'3p-5h' -and $data.quota.'3p-5h'.reset_in_seconds -ne $null) { [Math]::Max(0, [int](Safe-Double $data.quota.'3p-5h'.reset_in_seconds 0)) } else { -1 }
+$TP_WK_RESET = if ($data -and $data.quota -and $data.quota.'3p-weekly' -and $data.quota.'3p-weekly'.reset_in_seconds -ne $null) { [Math]::Max(0, [int](Safe-Double $data.quota.'3p-weekly'.reset_in_seconds 0)) } else { -1 }
 
 # ANSI Helpers
 $ESC = [char]27
@@ -138,59 +178,13 @@ $FG_BRIGHT_WHITE = "$ESC[97m"
 
 $NUM_COLOR = "${FG_BRIGHT_WHITE}${B}"
 
-# Timeout Process Helper
-function Run-WithTimeout {
-    param(
-        [string]$Command,
-        [string[]]$Arguments,
-        [int]$TimeoutMs = 1000
-    )
-    $psi = New-Object System.Diagnostics.ProcessStartInfo
-    $psi.FileName = $Command
-    $psi.Arguments = $Arguments -join " "
-    $psi.RedirectStandardOutput = $true
-    $psi.RedirectStandardError = $true
-    $psi.UseShellExecute = $false
-    $psi.CreateNoWindow = $true
-
-    $proc = New-Object System.Diagnostics.Process
-    $proc.StartInfo = $psi
-
-    try {
-        if ($proc.Start()) {
-            if ($proc.WaitForExit($TimeoutMs)) {
-                return $proc.StandardOutput.ReadToEnd()
-            } else {
-                try { $proc.Kill() } catch {}
-            }
-        }
-    } catch {}
-    finally {
-        if ($proc) {
-            try {
-                $proc.Close()
-                $proc.Dispose()
-            } catch {}
-        }
-    }
-    return $null
-}
-
 # VCS: Only query git directly if JSON payload didn't provide branch info
 if (-not $VCS_BRANCH) {
-    $env:GIT_OPTIONAL_LOCKS = '0'
     $GIT_DIR = if ($CWD) { $CWD.TrimEnd('\', '/') } else { "." }
-    if (Test-Path "$GIT_DIR") {
-        $gitBranch = Run-WithTimeout -Command "git" -Arguments @("-C", "`"$GIT_DIR`"", "rev-parse", "--abbrev-ref", "HEAD") -TimeoutMs 300
-        if ($gitBranch) {
-            $VCS_BRANCH = $gitBranch.Trim()
-            $status = Run-WithTimeout -Command "git" -Arguments @("-C", "`"$GIT_DIR`"", "status", "--porcelain") -TimeoutMs 300
-            if ($status) {
-                $VCS_DIRTY = $true
-            } else {
-                $VCS_DIRTY = $false
-            }
-        }
+    $gitInfo = Get-GitStatus -Path $GIT_DIR -TimeoutMs 200
+    if ($gitInfo.Available) {
+        $VCS_BRANCH = $gitInfo.Branch
+        $VCS_DIRTY = $gitInfo.Dirty
     }
 }
 
@@ -423,6 +417,7 @@ if ($PLAN_TIER -or $USER_EMAIL) {
 # Get hostname
 $HOST_NAME = ""
 try { $HOST_NAME = [System.Net.Dns]::GetHostName() } catch {}
+$HOST_NAME = if ($env:COMPUTERNAME) { $env:COMPUTERNAME } else { $HOST_NAME }
 
 $HOST_FMT = ""
 if ($HOST_NAME) {
@@ -434,30 +429,26 @@ if ($HOST_NAME) {
     }
 }
 
-# Get Power Status (Integrated Fast Power API Query - 0ms overhead)
+# Get Power Status
 $POWER_FMT = ""
-try {
-    # Ultra-fast SystemPowerStatus via .NET API (Instant, no WMI blocking risk)
-    Add-Type -Assembly "System.Windows.Forms" -ErrorAction SilentlyContinue
-    $p = [System.Windows.Forms.SystemInformation]::PowerStatus
-    if ($p) {
-        $chargePct = [int]($p.BatteryLifePercent * 100)
-        $lineStatus = $p.PowerLineStatus
-        if ($lineStatus -eq "Offline" -or ($chargePct -lt 100 -and $chargePct -gt 0 -and $lineStatus -ne "Online")) {
-            if ($USE_CLASSIC_ICONS) {
-                $POWER_FMT = "${DOT_L2}${FG_BRIGHT_YELLOW}${ICON_BAT}:${chargePct}%${R}"
-            } else {
-                $POWER_FMT = "${DOT_L2}${FG_BRIGHT_YELLOW}${ICON_BAT} ${chargePct}%${R}"
-            }
+$powerInfo = Get-PowerStatus
+if ($powerInfo) {
+    $chargePct = $powerInfo.Percent
+    $lineStatus = $powerInfo.LineStatus
+    if ($lineStatus -eq "Offline" -or ($chargePct -lt 100 -and $chargePct -gt 0 -and $lineStatus -ne "Online")) {
+        if ($USE_CLASSIC_ICONS) {
+            $POWER_FMT = "${DOT_L2}${FG_BRIGHT_YELLOW}${ICON_BAT}:${chargePct}%${R}"
         } else {
-            if ($USE_CLASSIC_ICONS) {
-                $POWER_FMT = "${DOT_L2}${FG_GREEN}${ICON_AC}${R}"
-            } else {
-                $POWER_FMT = "${DOT_L2}${FG_GREEN}${ICON_AC} AC${R}"
-            }
+            $POWER_FMT = "${DOT_L2}${FG_BRIGHT_YELLOW}${ICON_BAT} ${chargePct}%${R}"
+        }
+    } else {
+        if ($USE_CLASSIC_ICONS) {
+            $POWER_FMT = "${DOT_L2}${FG_GREEN}${ICON_AC}${R}"
+        } else {
+            $POWER_FMT = "${DOT_L2}${FG_GREEN}${ICON_AC} AC${R}"
         }
     }
-} catch {}
+}
 
 # State Indicator
 $S = ""
@@ -725,8 +716,7 @@ $Q_WK_FMT = if (($Q_WK -ne $null -and $Q_WK -ne -1)) { make_quota_bar $Q_WK "7D"
 
 
 # Output Assembly based on Column Width (Always 4 lines to prevent terminal jumping)
-$width = $COLS
-if ($width -lt 45) { $width = 45 } # Safety margin
+$width = [Math]::Max(20, [int]$COLS)
 
 # Box drawing characters
 $BOX_TOP_L = "╭─"
@@ -736,8 +726,8 @@ $BOX_BOT_R = "─╯"
 $BOX_MID_L = "│ "
 $BOX_MID_R = " │"
 
-$title = " Antigravity Dashboard "
-$top_border = "${FG_GRAY}${BOX_TOP_L}${R}${title}${FG_GRAY}$("─" * [Math]::Max(0, $width - 4 - $title.Length))${BOX_TOP_R}${R}"
+$title = if ($width -lt 40) { " Status " } elseif ($width -lt 70) { " Antigravity " } else { " Antigravity Dashboard " }
+$top_border = "${FG_GRAY}${BOX_TOP_L}${R}${title}${FG_GRAY}$("─" * [Math]::Max(0, $width - 4 - (visible_len $title)))${BOX_TOP_R}${R}"
 $bottom_border = "${FG_GRAY}${BOX_BOT_L}$("─" * [Math]::Max(0, $width - 4))${BOX_BOT_R}${R}"
 
 # Helper to format a single content line with borders and right alignment
@@ -875,7 +865,11 @@ $L3_LEFT = @($DIR_LEFT)
 $L3_RIGHT = @($V, $CONV_FMT)
 
 $L4_LEFT = @($SB, $POWER_FMT, $Q_5H_FMT, $Q_WK_FMT)
-$L4_RIGHT = @($ART_FMT, "${DOT_L2}${SUB_FMT}", "${DOT_L2}${BG_FMT}")
+$L4_RIGHT = @(
+    $(if ($ARTIFACTS -gt 0) { $ART_FMT } else { "" })
+    $(if ($SUBAGENTS -gt 0) { "${DOT_L2}${SUB_FMT}" } else { "" })
+    $(if ($BG_TASKS -gt 0) { "${DOT_L2}${BG_FMT}" } else { "" })
+)
 
 $out1 = $top_border
 $out2 = Format-BoxLine $L1_LEFT $L1_RIGHT $width

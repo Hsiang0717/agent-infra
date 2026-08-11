@@ -1,56 +1,101 @@
-# Antigravity CLI Custom Statusline Installation Guide
+# Antigravity CLI Statusline 安裝指南
 
-This guide describes how to install and configure the custom PowerShell-based statusline telemetry dashboard for the Antigravity CLI.
+這個 statusline 是一個小型 PowerShell 套件。`statusline.ps1` 是唯一入口，
+Git 與電源查詢則放在同一資料夾的 `.psm1` 模組中。
 
----
+## 安裝
 
-## Installation Steps
+請在本專案根目錄執行 PowerShell：
 
-### 1. Copy the Script File
-Copy the `statusline.ps1` script to your user directory's `.antigravity` folder:
-- **Source:** `agent-infra/status/statusline.ps1`
-- **Destination:** `C:\Users\<Username>\.antigravity\statusline.ps1`
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\agent-infra\status\install.ps1
+```
 
-*Note: Replace `<Username>` with your Windows system username.*
+請不要只複製 `statusline.ps1`；主腳本會從 `$PSScriptRoot` 載入兩個模組。
 
-### 2. Configure `settings.json`
-Open the Antigravity configuration file located at:
-`C:\Users\<Username>\.gemini\antigravity-cli\settings.json`
+## 設定 Antigravity CLI
 
-Add or update the `"statusLine"` block inside the JSON object (make sure to replace `<Username>` with your actual Windows username):
+開啟：
+
+```text
+C:\Users\<Username>\.gemini\antigravity-cli\settings.json
+```
+
+加入或更新：
 
 ```json
+{
   "statusLine": {
     "type": "custom",
     "command": "pwsh -NoProfile -ExecutionPolicy Bypass -File C:/Users/<Username>/.antigravity/statusline.ps1",
     "enabled": true
   }
+}
 ```
 
----
+請將 `<Username>` 替換成實際 Windows 使用者名稱。若使用 Windows PowerShell，
+可以把 `pwsh` 改成 `powershell`。
 
-## Script Parameter Guide
+## 更新
 
-The statusline script supports the following command-line parameters to customize behavior:
+更新程式碼後，重新執行安裝指令即可覆蓋主腳本與模組：
 
-### 1. Classic Icon Compatibility Mode (`--classic` / `--no-nerdfont` / `--compatibility`)
-By default, the statusline renders high-fidelity icons designed for terminals configured with a **Nerd Font**. If your terminal font does not support Nerd Font characters (showing them as broken boxes or garbled text), append this parameter to force plain Unicode/ASCII symbols:
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\agent-infra\status\install.ps1
+```
 
-- **Configuration syntax:**
-  ```json
-  "command": "pwsh -NoProfile -ExecutionPolicy Bypass -File C:/Users/<Username>/.antigravity/statusline.ps1 --classic"
-  ```
-- **Icon Changes:**
-  - `READY`: Uses `●` instead of ``
-  - `THINKING`: Uses `◆` instead of `󰟷`
-  - `WORKING`: Uses `⚙` instead of ``
-  - `VCS Branch`: Uses `╱` instead of ``
-  - `Sandbox Net/No-Net`: Uses text labels `ON (net)` / `ON (no-net)` instead of symbols
+預覽不實際覆蓋檔案：
 
-### 2. Statusline Legend (`--legend` / `-l` / `legend`)
-Run this parameter manually in your terminal to output a dynamic telemetry layout legend explaining what each icon and state represents:
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\agent-infra\status\install.ps1 -WhatIf
+```
 
-- **Command:**
-  ```powershell
-  pwsh -NoProfile -ExecutionPolicy Bypass -File C:\Users\<Username>\.antigravity\statusline.ps1 --legend
-  ```
+## 測試
+
+測試空輸入：
+
+```powershell
+'{}' | pwsh -NoProfile -ExecutionPolicy Bypass -File "$env:USERPROFILE\.antigravity\statusline.ps1"
+```
+
+顯示狀態圖例：
+
+```powershell
+pwsh -NoProfile -ExecutionPolicy Bypass -File "$env:USERPROFILE\.antigravity\statusline.ps1" --legend
+```
+
+## 命令列參數
+
+### Classic icon 模式
+
+適用於沒有 Nerd Font 的終端：
+
+```json
+"command": "pwsh -NoProfile -ExecutionPolicy Bypass -File C:/Users/<Username>/.antigravity/statusline.ps1 --classic"
+```
+
+支援的別名：
+
+```text
+--classic
+--no-nerdfont
+--compatibility
+```
+
+### Legend 模式
+
+支援：
+
+```text
+--legend
+-l
+legend
+```
+
+## 可選環境變數
+
+```powershell
+$env:ANTIGRAVITY_STATUS_NO_POWER = '1'
+```
+
+設定後會停用電池 / AC 查詢，適合遠端或高頻刷新環境。
