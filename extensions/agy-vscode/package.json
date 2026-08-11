@@ -1,5 +1,5 @@
 {
-  "name": "agy-extension",
+  "name": "agy-vscode",
   "displayName": "AGY CLI",
   "description": "Quickly open AGY CLI in a native terminal.",
   "version": "0.0.5",
@@ -17,9 +17,7 @@
   ],
   "main": "./out/extension.js",
   "activationEvents": [
-    "onCommand:agy.start",
-    "onCommand:agy.wrapAsConflict",
-    "onCommand:agy.copyAsIntentDiff"
+    "onCommand:agy.start"
   ],
   "contributes": {
     "commands": [
@@ -27,27 +25,6 @@
         "command": "agy.start",
         "title": "Open AGY CLI",
         "icon": "resources/icon.svg"
-      },
-      {
-        "command": "agy.wrapAsConflict",
-        "title": "AGY: Wrap as Intent Conflict"
-      },
-      {
-        "command": "agy.copyAsIntentDiff",
-        "title": "AGY: Copy as Intent Prompt",
-        "icon": "$(copy)"
-      }
-    ],
-    "keybindings": [
-      {
-        "command": "agy.wrapAsConflict",
-        "key": "alt+-",
-        "when": "editorTextFocus"
-      },
-      {
-        "command": "agy.copyAsIntentDiff",
-        "key": "alt+shift+c",
-        "when": "editorTextFocus"
       }
     ],
     "menus": {
@@ -56,35 +33,8 @@
           "command": "agy.start",
           "group": "navigation",
           "when": "true"
-        },
-        {
-          "command": "agy.copyAsIntentDiff",
-          "group": "navigation",
-          "when": "true"
-        }
-      ],
-      "editor/context": [
-        {
-          "command": "agy.wrapAsConflict",
-          "group": "agy@1",
-          "when": "editorTextFocus"
-        },
-        {
-          "command": "agy.copyAsIntentDiff",
-          "group": "agy@2",
-          "when": "editorTextFocus"
         }
       ]
-    },
-    "configuration": {
-      "title": "AGY Intent Diff",
-      "properties": {
-        "agy.intentDiff.prefixTemplate": {
-          "type": "string",
-          "default": "Please update or review the code inside the \"<<<<<<< Original\" block according to the instructions, comments, or refactoring intent provided in the \">>>>>>> Instruction / Comment\" section.",
-          "markdownDescription": "System instruction prefix prepended before the file content when using **Copy as Intent Prompt**."
-        }
-      }
     }
   },
   "scripts": {
