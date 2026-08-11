@@ -178,6 +178,7 @@ function Run-WithTimeout {
 
 # VCS: Only query git directly if JSON payload didn't provide branch info
 if (-not $VCS_BRANCH) {
+    $env:GIT_OPTIONAL_LOCKS = '0'
     $GIT_DIR = if ($CWD) { $CWD.TrimEnd('\', '/') } else { "." }
     if (Test-Path "$GIT_DIR") {
         $gitBranch = Run-WithTimeout -Command "git" -Arguments @("-C", "`"$GIT_DIR`"", "rev-parse", "--abbrev-ref", "HEAD") -TimeoutMs 300
@@ -737,7 +738,7 @@ $BOX_MID_R = " │"
 
 $title = " Antigravity Dashboard "
 $top_border = "${FG_GRAY}${BOX_TOP_L}${R}${title}${FG_GRAY}$("─" * [Math]::Max(0, $width - 4 - $title.Length))${BOX_TOP_R}${R}"
-$bottom_border = "${FG_GRAY}${BOX_BOT_L}$("─" * ($width - 4))${BOX_BOT_R}${R}"
+$bottom_border = "${FG_GRAY}${BOX_BOT_L}$("─" * [Math]::Max(0, $width - 4))${BOX_BOT_R}${R}"
 
 # Helper to format a single content line with borders and right alignment
 function Strip-Separator($str) {
