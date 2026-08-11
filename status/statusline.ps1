@@ -7,100 +7,109 @@ try {
     # Set Output Encoding to UTF-8 to support nerd font icons on Windows
     try { [Console]::OutputEncoding = [System.Text.Encoding]::UTF8 } catch {}
 
-    # Check for legend parameter before reading stdin
-    foreach ($arg in $args) {
-        if ($arg -eq "--legend" -or $arg -eq "-l" -or $arg -eq "-Legend" -or $arg -eq "legend") {
-            Write-Host "🚀 Antigravity CLI Statusline Legend" -ForegroundColor Green
-            Write-Host "This statusline adapts dynamically to your terminal width and theme settings.`n"
-            
-            Write-Host "LAYOUTS:" -ForegroundColor White
-            Write-Host "  - Wide Layout (>= 180 chars): Single-row, full developer telemetry dashboard."
-            Write-Host "  - Medium Layout (>= 90 chars): Two-line boxed block to prevent line wrap."
-            Write-Host "  - Small Layout (< 90 chars): Minimalist indicator for status, model, context & tasks.`n"
-            
-            Write-Host "COMPONENTS & ICONS:" -ForegroundColor White
-            Write-Host "  Field                Nerd Font   Classic     Description" -ForegroundColor White
-            Write-Host "  --------------------------------------------------------------------------------"
-            
-            Write-Host "  State: READY         " -NoNewline; Write-Host "           " -ForegroundColor Green -NoNewline; Write-Host "●           " -ForegroundColor Green -NoNewline; Write-Host "Agent is idle, ready for user requests."
-            Write-Host "  State: THINKING      " -NoNewline; Write-Host "󰟷           " -ForegroundColor Yellow -NoNewline; Write-Host "◆           " -ForegroundColor Yellow -NoNewline; Write-Host "Agent is processing/thinking."
-            Write-Host "  State: WORKING       " -NoNewline; Write-Host "           " -ForegroundColor Cyan -NoNewline; Write-Host "⚙           " -ForegroundColor Cyan -NoNewline; Write-Host "Agent is executing background operations."
-            Write-Host "  State: TOOL          " -NoNewline; Write-Host "           " -ForegroundColor Magenta -NoNewline; Write-Host "🔧          " -ForegroundColor Magenta -NoNewline; Write-Host "Agent is running a tool."
-            Write-Host "  State: UNKNOWN       " -NoNewline; Write-Host "           " -ForegroundColor White -NoNewline; Write-Host "⏳          " -ForegroundColor White -NoNewline; Write-Host "Agent state is unknown or initializing."
-            Write-Host "  VCS Branch           " -NoNewline; Write-Host "           " -ForegroundColor Blue -NoNewline; Write-Host "/           " -ForegroundColor Gray -NoNewline; Write-Host "Current Git branch name (Red + * if dirty)."
-            Write-Host "  Model                " -NoNewline; Write-Host "           " -ForegroundColor Magenta -NoNewline; Write-Host "(None)      " -ForegroundColor DarkGray -NoNewline; Write-Host "Current active LLM model name/ID."
-            Write-Host "  Sandbox Network      " -NoNewline; Write-Host "󰒙           " -ForegroundColor Green -NoNewline; Write-Host "ON (net)    " -ForegroundColor Green -NoNewline; Write-Host "Sandbox enabled with internet access."
-            Write-Host "  Sandbox Restricted   " -NoNewline; Write-Host "󰴴           " -ForegroundColor Green -NoNewline; Write-Host "ON (no-net) " -ForegroundColor Green -NoNewline; Write-Host "Sandbox enabled with network disabled."
-            Write-Host "  Sandbox Off          " -NoNewline; Write-Host "󰦜           " -ForegroundColor Red -NoNewline; Write-Host "sandbox off " -ForegroundColor Gray -NoNewline; Write-Host "Sandbox is disabled (runs on host)."
-            Write-Host "  Context Bar          " -NoNewline; Write-Host "󱍏           " -ForegroundColor Yellow -NoNewline; Write-Host "ctx         " -ForegroundColor Gray -NoNewline; Write-Host "20-segment visual context window usage bar."
-            Write-Host "  Artifacts            " -NoNewline; Write-Host "           " -ForegroundColor Blue -NoNewline; Write-Host "artifacts   " -ForegroundColor Gray -NoNewline; Write-Host "Number of active output artifacts."
-            Write-Host "  Subagents            " -NoNewline; Write-Host "󱙺           " -ForegroundColor Cyan -NoNewline; Write-Host "subagents   " -ForegroundColor Gray -NoNewline; Write-Host "Number of spawned active subagents."
-            Write-Host "  Background Tasks     " -NoNewline; Write-Host "           " -ForegroundColor Magenta -NoNewline; Write-Host "tasks       " -ForegroundColor Gray -NoNewline; Write-Host "Number of background tasks running."
-            Write-Host "  Current Directory    " -NoNewline; Write-Host "           " -ForegroundColor Cyan -NoNewline; Write-Host "/           " -ForegroundColor Gray -NoNewline; Write-Host "Current working directory path (shortened)."
-            Write-Host "  Conversation ID      " -NoNewline; Write-Host "󰍪           " -ForegroundColor Gray -NoNewline; Write-Host "/           " -ForegroundColor Gray -NoNewline; Write-Host "Short prefix of the current session ID."
-            Write-Host "  Tokens Sum           " -NoNewline; Write-Host "           " -ForegroundColor Yellow -NoNewline; Write-Host "(None)      " -ForegroundColor DarkGray -NoNewline; Write-Host "Total input/output tokens parsed."
-            Write-Host "  Quota Reset Time     " -NoNewline; Write-Host "⌛️          " -ForegroundColor Gray -NoNewline; Write-Host "⌛          " -ForegroundColor Gray -NoNewline; Write-Host "Remaining time until LLM quota resets."
-            Write-Host "  Power Mains (AC)     " -NoNewline; Write-Host "󰚥           " -ForegroundColor Green -NoNewline; Write-Host "AC          " -ForegroundColor Green -NoNewline; Write-Host "Host is connected to external AC power."
-            Write-Host "  Power Battery (UPS)  " -NoNewline; Write-Host "🔋           " -ForegroundColor Yellow -NoNewline; Write-Host "BAT         " -ForegroundColor Yellow -NoNewline; Write-Host "Host is running on battery (shows charge %)."
-            
-            Write-Host "`nTIPS:" -ForegroundColor White
-            Write-Host "  To toggle Classic Icon mode, use the -classic or --classic option in settings.json configuration."
-            $global:LASTEXITCODE = 0
-            exit 0
+
+
+    # Read JSON input from stdin safely
+    $inputJson = ""
+    try {
+        if ([Console]::IsInputRedirected) {
+            $inputJson = [Console]::In.ReadToEnd()
+        }
+    } catch {}
+    if (-not $inputJson -or $inputJson.Trim().Length -eq 0) {
+        try {
+            $inputJson = $input | Out-String
+        } catch {}
+    }
+
+    # Parse JSON safely, create empty object fallback if input is null/empty
+    $data = $null
+    if ($inputJson -and $inputJson.Trim().Length -gt 0) {
+        try {
+            $data = ConvertFrom-Json $inputJson
+        } catch {}
+    }
+    if ($data -eq $null) {
+        $data = [PSCustomObject]@{
+            agent_state = "idle"
+            terminal_width = 100
         }
     }
 
-    # Read JSON input from stdin
-    $inputJson = $input | Out-String
-    if (-not $inputJson -or $inputJson.Trim().Length -eq 0) {
-        $global:LASTEXITCODE = 0
-        exit 0
+function Safe-Double([object]$val, [double]$default = 0.0) {
+    if ($val -eq $null) { return $default }
+    $d = 0.0
+    if ([double]::TryParse([string]$val, [System.Globalization.NumberStyles]::Any, [System.Globalization.CultureInfo]::InvariantCulture, [ref]$d)) {
+        if ([double]::IsNaN($d) -or [double]::IsInfinity($d)) { return $default }
+        return $d
     }
+    return $default
+}
 
-    # Parse JSON safely
-    try {
-        $data = ConvertFrom-Json $inputJson
-    } catch {
-        $global:LASTEXITCODE = 0
-        exit 0
-    }
+function Safe-Quota([object]$quotaObj) {
+    if ($quotaObj -eq $null -or $quotaObj.remaining_fraction -eq $null) { return -1 }
+    $val = Safe-Double $quotaObj.remaining_fraction -999.0
+    if ($val -eq -999.0 -or $val -lt 0) { return -1 }
+    return [Math]::Round($val * 100, 1)
+}
 
 # Extract properties with fallbacks
-$STATE = if ($data.agent_state) { $data.agent_state } else { "idle" }
-$USED_PCT = if ($data.context_window.used_percentage -ne $null) { $data.context_window.used_percentage } else { 0 }
-$VCS_BRANCH = if ($data.vcs.branch) { $data.vcs.branch } else { "" }
-$VCS_DIRTY = if ($data.vcs.dirty -ne $null) { $data.vcs.dirty } else { $false }
-$SANDBOX = if ($data.sandbox.enabled -ne $null) { $data.sandbox.enabled } else { $false }
-$SANDBOX_NET = if ($data.sandbox.allow_network -ne $null) { $data.sandbox.allow_network } else { $false }
-$ARTIFACTS = if ($data.artifact_count -ne $null) { $data.artifact_count } else { 0 }
-$SUBAGENTS = if ($data.subagents -and $data.subagents.GetType().IsArray) { $data.subagents.Length } else { 0 }
-$BG_TASKS = if ($data.task_count -ne $null) { $data.task_count } else { 0 }
-$MODEL_ID = if ($data.model.id) { $data.model.id } else { "" }
-$MODEL_NAME = if ($data.model.display_name) { $data.model.display_name } else { "" }
-$COLS = if ($data.terminal_width -ne $null) { $data.terminal_width } else { 80 }
-$CWD = if ($data.cwd) { $data.cwd } else { "" }
-$CONV_ID = if ($data.conversation_id) { $data.conversation_id } else { "" }
-$CLI_VERSION = if ($data.version) { $data.version } else { "" }
-$PLAN_TIER = if ($data.plan_tier) { $data.plan_tier } else { "" }
-$USER_EMAIL = if ($data.email) { $data.email } else { "" }
-$TURN_INPUT_TOKENS = if ($data.context_window.current_usage.input_tokens -ne $null) { $data.context_window.current_usage.input_tokens } else { 0 }
-$TURN_OUTPUT_TOKENS = if ($data.context_window.current_usage.output_tokens -ne $null) { $data.context_window.current_usage.output_tokens } else { 0 }
+$STATE = if ($data -and $data.agent_state) { $data.agent_state } else { "idle" }
+$usedPctVal = 0.0
+if ($data -and $data.context_window -and $data.context_window.used_percentage -ne $null) {
+    $usedPctVal = $data.context_window.used_percentage
+}
+$USED_PCT = Safe-Double $usedPctVal 0.0
 
-$INPUT_TOKENS = if ($data.context_window.total_input_tokens -ne $null) { $data.context_window.total_input_tokens } else { 0 }
-$OUTPUT_TOKENS = if ($data.context_window.total_output_tokens -ne $null) { $data.context_window.total_output_tokens } else { 0 }
-$CTX_LIMIT = if ($data.context_window.context_window_size -ne $null) { $data.context_window.context_window_size } else { 0 }
+$VCS_BRANCH = if ($data -and $data.vcs -and $data.vcs.branch) { $data.vcs.branch } else { "" }
+$VCS_DIRTY = if ($data -and $data.vcs -and $data.vcs.dirty -ne $null) { $data.vcs.dirty } else { $false }
+$SANDBOX = if ($data -and $data.sandbox -and $data.sandbox.enabled -ne $null) { $data.sandbox.enabled } else { $false }
+$SANDBOX_NET = if ($data -and $data.sandbox -and $data.sandbox.allow_network -ne $null) { $data.sandbox.allow_network } else { $false }
+$ARTIFACTS = if ($data -and $data.artifact_count -ne $null) { $data.artifact_count } else { 0 }
+$SUBAGENTS = if ($data -and $data.subagents -and $data.subagents.GetType().IsArray) { $data.subagents.Length } else { 0 }
+$BG_TASKS = if ($data -and $data.task_count -ne $null) { $data.task_count } else { 0 }
+$MODEL_ID = if ($data -and $data.model -and $data.model.id) { $data.model.id } else { "" }
+$MODEL_NAME = if ($data -and $data.model -and $data.model.display_name) { $data.model.display_name } else { "" }
+$COLS = if ($data -and $data.terminal_width -ne $null) { $data.terminal_width } else { 80 }
+$CWD = if ($data -and $data.cwd) { $data.cwd } else { "" }
+$CONV_ID = if ($data -and $data.conversation_id) { $data.conversation_id } else { "" }
+$CLI_VERSION = if ($data -and $data.version) { $data.version } else { "" }
+$PLAN_TIER = if ($data -and $data.plan_tier) { $data.plan_tier } else { "" }
+$USER_EMAIL = if ($data -and $data.email) { $data.email } else { "" }
+
+$TURN_INPUT_TOKENS = 0
+if ($data -and $data.context_window -and $data.context_window.current_usage -and $data.context_window.current_usage.input_tokens -ne $null) {
+    $TURN_INPUT_TOKENS = $data.context_window.current_usage.input_tokens
+}
+$TURN_OUTPUT_TOKENS = 0
+if ($data -and $data.context_window -and $data.context_window.current_usage -and $data.context_window.current_usage.output_tokens -ne $null) {
+    $TURN_OUTPUT_TOKENS = $data.context_window.current_usage.output_tokens
+}
+
+$INPUT_TOKENS = 0
+if ($data -and $data.context_window -and $data.context_window.total_input_tokens -ne $null) {
+    $INPUT_TOKENS = $data.context_window.total_input_tokens
+}
+$OUTPUT_TOKENS = 0
+if ($data -and $data.context_window -and $data.context_window.total_output_tokens -ne $null) {
+    $OUTPUT_TOKENS = $data.context_window.total_output_tokens
+}
+$CTX_LIMIT = 0
+if ($data -and $data.context_window -and $data.context_window.context_window_size -ne $null) {
+    $CTX_LIMIT = $data.context_window.context_window_size
+}
 $CTX_USED = $INPUT_TOKENS + $OUTPUT_TOKENS
 
 # Quotas
-$GEMINI_5H = if ($data.quota.'gemini-5h'.remaining_fraction -ne $null) { [Math]::Round($data.quota.'gemini-5h'.remaining_fraction * 100, 1) } else { -1 }
-$GEMINI_WK = if ($data.quota.'gemini-weekly'.remaining_fraction -ne $null) { [Math]::Round($data.quota.'gemini-weekly'.remaining_fraction * 100, 1) } else { -1 }
-$TP_5H = if ($data.quota.'3p-5h'.remaining_fraction -ne $null) { [Math]::Round($data.quota.'3p-5h'.remaining_fraction * 100, 1) } else { -1 }
-$TP_WK = if ($data.quota.'3p-weekly'.remaining_fraction -ne $null) { [Math]::Round($data.quota.'3p-weekly'.remaining_fraction * 100, 1) } else { -1 }
+$GEMINI_5H = Safe-Quota $data.quota.'gemini-5h'
+$GEMINI_WK = Safe-Quota $data.quota.'gemini-weekly'
+$TP_5H = Safe-Quota $data.quota.'3p-5h'
+$TP_WK = Safe-Quota $data.quota.'3p-weekly'
 
-$GEMINI_5H_RESET = if ($data.quota.'gemini-5h'.reset_in_seconds -ne $null) { $data.quota.'gemini-5h'.reset_in_seconds } else { -1 }
-$GEMINI_WK_RESET = if ($data.quota.'gemini-weekly'.reset_in_seconds -ne $null) { $data.quota.'gemini-weekly'.reset_in_seconds } else { -1 }
-$TP_5H_RESET = if ($data.quota.'3p-5h'.reset_in_seconds -ne $null) { $data.quota.'3p-5h'.reset_in_seconds } else { -1 }
-$TP_WK_RESET = if ($data.quota.'3p-weekly'.reset_in_seconds -ne $null) { $data.quota.'3p-weekly'.reset_in_seconds } else { -1 }
+$GEMINI_5H_RESET = if ($data -and $data.quota -and $data.quota.'gemini-5h' -and $data.quota.'gemini-5h'.reset_in_seconds -ne $null) { $data.quota.'gemini-5h'.reset_in_seconds } else { -1 }
+$GEMINI_WK_RESET = if ($data -and $data.quota -and $data.quota.'gemini-weekly' -and $data.quota.'gemini-weekly'.reset_in_seconds -ne $null) { $data.quota.'gemini-weekly'.reset_in_seconds } else { -1 }
+$TP_5H_RESET = if ($data -and $data.quota -and $data.quota.'3p-5h' -and $data.quota.'3p-5h'.reset_in_seconds -ne $null) { $data.quota.'3p-5h'.reset_in_seconds } else { -1 }
+$TP_WK_RESET = if ($data -and $data.quota -and $data.quota.'3p-weekly' -and $data.quota.'3p-weekly'.reset_in_seconds -ne $null) { $data.quota.'3p-weekly'.reset_in_seconds } else { -1 }
 
 # ANSI Helpers
 $ESC = [char]27
@@ -158,7 +167,10 @@ function Run-WithTimeout {
     } catch {}
     finally {
         if ($proc) {
-            try { $proc.Dispose() } catch {}
+            try {
+                $proc.Close()
+                $proc.Dispose()
+            } catch {}
         }
     }
     return $null
@@ -225,7 +237,8 @@ function shorten_path($path, $max_len = 25) {
             if ($leaf.Length -gt ($max_len - 3)) {
                 $slice_len = $max_len - 3
                 if ($slice_len -lt 1) { $slice_len = 1 }
-                return "..." + $leaf.Substring($leaf.Length - $slice_len)
+                $startIdx = [Math]::Max(0, $leaf.Length - $slice_len)
+                return "..." + (Safe-Substring $leaf $startIdx $slice_len)
             }
             return "..." + $leaf
         }
@@ -235,12 +248,22 @@ function shorten_path($path, $max_len = 25) {
     }
 }
 
+function Safe-Substring([string]$str, [int]$startIndex, [int]$length) {
+    if (-not $str) { return "" }
+    if ($startIndex -lt 0) { $startIndex = 0 }
+    if ($startIndex -ge $str.Length) { return "" }
+    if ($length -le 0) { return "" }
+    $actualLength = [Math]::Min($length, $str.Length - $startIndex)
+    return $str.Substring($startIndex, $actualLength)
+}
+
 function Truncate-String($str, $maxLen) {
     if (-not $str) { return "" }
     $str = [string]$str
+    if ($maxLen -le 0) { return "" }
     if ($str.Length -le $maxLen) { return $str }
-    if ($maxLen -le 3) { return $str.Substring(0, [Math]::Max(0, $maxLen)) }
-    return $str.Substring(0, $maxLen - 3) + "..."
+    if ($maxLen -le 3) { return Safe-Substring $str 0 $maxLen }
+    return (Safe-Substring $str 0 ($maxLen - 3)) + "..."
 }
 
 # Dynamic limits based on terminal width ($COLS)
@@ -274,6 +297,9 @@ foreach ($arg in $args) {
     if ($arg -eq "--classic" -or $arg -eq "--no-nerdfont" -or $arg -eq "--compatibility") {
         $USE_CLASSIC_ICONS = $true
     }
+}
+if ($data -and ($data.nerdfont -eq $false -or $data.classic -eq $true -or $data.theme -eq "classic")) {
+    $USE_CLASSIC_ICONS = $true
 }
 
 if ($USE_CLASSIC_ICONS) {
@@ -335,8 +361,12 @@ function visible_len($str) {
     for ($i = 0; $i -lt $stripped.Length; $i++) {
         $val = 0
         if ([char]::IsHighSurrogate($stripped[$i]) -and ($i + 1 -lt $stripped.Length) -and [char]::IsLowSurrogate($stripped[$i + 1])) {
-            $val = [char]::ConvertToUtf32($stripped, $i)
-            $i++ # Skip low surrogate
+            try {
+                $val = [char]::ConvertToUtf32($stripped, $i)
+                $i++ # Skip low surrogate
+            } catch {
+                $val = [int]$stripped[$i]
+            }
         } else {
             $val = [int]$stripped[$i]
         }
@@ -403,10 +433,10 @@ if ($HOST_NAME) {
     }
 }
 
-# Get Power Status (Integrated Fast Power API Query)
+# Get Power Status (Integrated Fast Power API Query - 0ms overhead)
 $POWER_FMT = ""
 try {
-    # Method 1: Ultra-fast SystemPowerStatus via .NET/Win32 API (0ms overhead)
+    # Ultra-fast SystemPowerStatus via .NET API (Instant, no WMI blocking risk)
     Add-Type -Assembly "System.Windows.Forms" -ErrorAction SilentlyContinue
     $p = [System.Windows.Forms.SystemInformation]::PowerStatus
     if ($p) {
@@ -427,33 +457,6 @@ try {
         }
     }
 } catch {}
-
-if (-not $POWER_FMT -and -not $script:NO_BATTERY_FOUND) {
-    try {
-        $battery = Get-CimInstance -ClassName Win32_Battery -Property BatteryStatus, EstimatedChargeRemaining -OperationTimeoutSec 1 -ErrorAction SilentlyContinue
-        if ($battery) {
-            $status = $battery.BatteryStatus
-            $cap = $battery.EstimatedChargeRemaining
-            if ($status -eq 1) {
-                if ($USE_CLASSIC_ICONS) {
-                    $POWER_FMT = "${DOT_L2}${FG_BRIGHT_YELLOW}${ICON_BAT}:${cap}%${R}"
-                } else {
-                    $POWER_FMT = "${DOT_L2}${FG_BRIGHT_YELLOW}${ICON_BAT} ${cap}%${R}"
-                }
-            } else {
-                if ($USE_CLASSIC_ICONS) {
-                    $POWER_FMT = "${DOT_L2}${FG_GREEN}${ICON_AC}${R}"
-                } else {
-                    $POWER_FMT = "${DOT_L2}${FG_GREEN}${ICON_AC} AC${R}"
-                }
-            }
-        } else {
-            $script:NO_BATTERY_FOUND = $true
-        }
-    } catch {
-        $script:NO_BATTERY_FOUND = $true
-    }
-}
 
 # State Indicator
 $S = ""
@@ -564,7 +567,7 @@ if ($USE_CLASSIC_ICONS) {
 
 $CONV_FMT = ""
 if ($CONV_ID) {
-    $short_conv = $CONV_ID.Substring(0, [Math]::Min(8, $CONV_ID.Length))
+    $short_conv = Safe-Substring $CONV_ID 0 8
     if ($USE_CLASSIC_ICONS) {
         $CONV_FMT = "${DOT_L1}${FG_GRAY}${short_conv}${R}"
     } else {
@@ -807,9 +810,9 @@ function Format-FlexWrapLine($left_items, $right_items, $total_width) {
         if ($item_vis -gt $max_content) {
             $processed_item = $processed_item -replace '\x1b\[[0-9;]*m', ''
             if ($max_content -gt 3) {
-                $processed_item = $processed_item.Substring(0, $max_content - 3) + "..."
+                $processed_item = (Safe-Substring $processed_item 0 ($max_content - 3)) + "..."
             } else {
-                $processed_item = $processed_item.Substring(0, $max_content)
+                $processed_item = Safe-Substring $processed_item 0 $max_content
             }
             $item_vis = visible_len $processed_item
         }
@@ -829,9 +832,9 @@ function Format-FlexWrapLine($left_items, $right_items, $total_width) {
             if ($stripped_vis -gt $max_content) {
                 $stripped_item = $stripped_item -replace '\x1b\[[0-9;]*m', ''
                 if ($max_content -gt 3) {
-                    $stripped_item = $stripped_item.Substring(0, $max_content - 3) + "..."
+                    $stripped_item = (Safe-Substring $stripped_item 0 ($max_content - 3)) + "..."
                 } else {
-                    $stripped_item = $stripped_item.Substring(0, $max_content)
+                    $stripped_item = Safe-Substring $stripped_item 0 $max_content
                 }
                 $stripped_vis = visible_len $stripped_item
             }
@@ -879,7 +882,7 @@ $out3 = Format-BoxLine $L2_LEFT $L2_RIGHT $width
 $out4 = Format-BoxLine $L3_LEFT $L3_RIGHT $width
 $out5 = Format-BoxLine $L4_LEFT $L4_RIGHT $width
 $out6 = $bottom_border
-"${out1}`n${out2}`n${out3}`n${out4}`n${out5}`n${out6}"
+Write-Output "${out1}`n${out2}`n${out3}`n${out4}`n${out5}`n${out6}"
 $global:LASTEXITCODE = 0
 exit 0
 } catch {
