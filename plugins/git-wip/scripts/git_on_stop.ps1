@@ -45,8 +45,23 @@ function Commit-WipIfDirty($repoDir) {
         if ($LASTEXITCODE -eq 0) {
             $status = git status --porcelain 2>$null
             if ($status) {
+                # ISO 8601 format for precise LLM temporal sequence understanding
+                $isoTime = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+
+                # Extract changed file names (top 3)
+                $changedFiles = $status | ForEach-Object {
+                    $line = $_.Trim()
+                    if ($line.Length -gt 3) {
+                        $f = $line.Substring(3).Trim()
+                        Split-Path $f -Leaf
+                    }
+                } | Select-Object -Unique -First 3
+
+                $fileSummary = if ($changedFiles) { " (" + ($changedFiles -join ", ") + ")" } else { "" }
+                $subject = "WIP: [$isoTime]$fileSummary"
+
                 git add -A 2>$null
-                git commit -m "WIP" --no-verify 2>$null
+                git commit -m "$subject" --no-verify 2>$null
             }
         }
     } finally {

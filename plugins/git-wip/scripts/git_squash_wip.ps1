@@ -17,7 +17,7 @@ function Squash-RepoWip($repoDir) {
         $wipCount = 0
 
         foreach ($subject in $logLines) {
-            if ($subject -match "^WIP(\s.*)?$") {
+            if ($subject -match "^WIP(\b|:|\s).*$") {
                 $wipCount++
             } else {
                 break
