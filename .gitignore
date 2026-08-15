@@ -4,3 +4,7 @@ out/
 .vscode/
 ATO_PLAN/
 SKILL_ZH.md
+node.DS_Store
+Thumbs.db
+*.tmp
+# test hook trigger/
