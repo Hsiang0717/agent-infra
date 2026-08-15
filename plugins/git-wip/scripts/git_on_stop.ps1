@@ -1,14 +1,28 @@
 [Console]::InputEncoding = [System.Text.Encoding]::UTF8
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 
-$rawInput = ($input | Out-String).TrimStart([char]0xFEFF).Trim()
-if (-not $rawInput) {
-    $rawInput = [Console]::In.ReadToEnd().TrimStart([char]0xFEFF).Trim()
-}
-
 $payload = $null
-if ($rawInput) {
-    try { $payload = $rawInput | ConvertFrom-Json } catch {}
+try {
+    $builder = [System.Text.StringBuilder]::new()
+    while ($true) {
+        $line = [Console]::In.ReadLine()
+        if ($null -eq $line) { break }
+        $null = $builder.AppendLine($line)
+        $text = $builder.ToString().Trim().TrimStart([char]0xFEFF)
+        if ($text.StartsWith("{") -and $text.EndsWith("}")) {
+            try {
+                $payload = $text | ConvertFrom-Json
+                if ($null -ne $payload) { break }
+            } catch {}
+        }
+    }
+} catch {}
+
+if ($null -eq $payload -and $input) {
+    try {
+        $text = ($input | Out-String).Trim().TrimStart([char]0xFEFF)
+        $payload = $text | ConvertFrom-Json
+    } catch {}
 }
 
 $response = @{ decision = "allow" }
@@ -40,8 +54,13 @@ function Commit-WipIfDirty($repoDir) {
     }
 }
 
-# Create WIP snapshot only when agent finishes turn normally
-if ($reason -eq "model_stop" -and $fullyIdle) {
+# Create WIP snapshot
+$shouldCommit = $true
+if ($reason) {
+    $shouldCommit = ($reason -eq "model_stop" -and $fullyIdle)
+}
+
+if ($shouldCommit) {
     $targetRepos = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
 
     foreach ($rootDir in $rootDirs) {

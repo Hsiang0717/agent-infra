@@ -19,6 +19,8 @@ license: MIT
   * [git-mr-flow](skills/git-mr-flow/): 基於 Merge Request 的 Git 工作流引導。
   * [pi-agent-delegate](skills/pi-agent-delegate/): 將任務委派給本機 `pi` CLI Agent。
   * [skill-creator](skills/skill-creator/): Skill 建立、評測與效能最佳化工具。
+* **[plugins/](plugins/)**: 外掛整合套件（Antigravity Plugins）。
+  * [git-wip](plugins/git-wip/): 自動於任務結束建立 WIP 快照，並提供 `/git-wip-done` 壓縮清理 Commit。
 * **[extensions/](extensions/)**: 編輯器擴充套件。
   * [agy-vscode](extensions/agy-vscode/): VS Code 擴充套件，提供一鍵啟動 AGY CLI 的快捷圖示。
 * **[status/](status/)**: 狀態列遙測儀表板。
