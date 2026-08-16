@@ -1,21 +1,29 @@
 ---
 name: git-wip-done
-description: "Squashes and cleans up top consecutive WIP commits into a single clean commit."
+description: "Finalizes Agent memory (refs/wip/*) into a single clean Conventional Commit on HEAD and archives turn snapshots."
 usage: "/git-wip-done [commit_message]"
 ---
 
-# Done Command Handler
+# /git-wip-done Command Handler
 
-When the `/git-wip-done` command is received or when finalizing WIP snapshots:
+The `/git-wip-done` command serves as the **Transaction Commit Boundary** for Agent tasks.
 
-1. **Parameter Handling**:
-   - If the user provides a commit message: pass it via `-Message "<message>"`.
-   - If no message is provided: run the script with the default message, or summarize the current session's changes into an appropriate semantic commit message.
+## Workflow Execution Steps:
 
-2. **Execute Command**:
+1. **Summarize Changes & Draft Conventional Commit**:
+   - Inspect the modified files and recent turn snapshots.
+   - If user provided a message (e.g. `/git-wip-done feat(backend): add sse`), use it.
+   - If not provided, generate a structured Conventional Commit message (e.g. `feat(scope): ...` or `fix(scope): ...`).
+
+2. **Execute Transaction Finalization Script**:
    ```powershell
    pwsh -NoProfile -File ./scripts/git_squash_wip.ps1 -Message "<Commit Message>"
    ```
-   *Note: If the script cannot be directly located due to different installation paths, the Agent may directly execute Git commands (`git reset --soft HEAD~<WIP_COUNT>` and `git commit -m "<Commit Message>"`) to squash consecutive WIP commits.*
+   *Action Details*:
+   - Stages all working tree modifications.
+   - Creates exactly **1 formal commit on `HEAD`**.
+   - Archives Agent shadow memory to `refs/wip/<branch>/archive/<timestamp>`.
+   - Re-aligns `refs/wip/<branch>/current` to the new `HEAD`.
 
-3. **Report Result**: Output the number of squashed WIP commits along with the resulting commit hash and message.
+3. **Report Result**:
+   - Output the resulting commit hash, commit message, and archive ref status.
