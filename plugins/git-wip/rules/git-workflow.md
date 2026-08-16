@@ -1,7 +1,7 @@
 # Git WIP Workflow & Agent Memory Guidelines
 
 ## Core Principles
-- **HEAD is human-accepted history**: `git log` must only contain clean, semantic, human-approved Conventional Commits.
+- **HEAD is human-accepted history**: `git log` must strictly contain clean, semantic, human-approved Conventional Commits.
 - **`refs/wip/*` is Agent memory**: Granular snapshots are automatically recorded in background shadow refs (`refs/wip/<branch>/current`) on every turn without modifying `HEAD` or interfering with user staging (`git add`).
 
 ## Workflow Directives
@@ -13,42 +13,42 @@
 
 ---
 
-## Agent Memory Operational Recipes (指令與語法指南)
+## Agent Memory Operational Recipes (Syntax & Execution Guide)
 
 When inspecting history, reviewing diffs, or performing rollbacks, the Agent should use the following standard Git commands:
 
-### 1. 檢視 Agent 記憶與歷程 (Inspection)
-- **查看最近的回合快照列表**：
+### 1. Agent Memory Inspection
+- **List recent turn snapshots**:
   ```bash
   git log --oneline -n 10 refs/wip/<branch>/current
   ```
-- **查看本階段所有回合相對於 HEAD 的變更清單**：
+- **List files changed in current session relative to HEAD**:
   ```bash
   git diff --stat HEAD..refs/wip/<branch>/current
   ```
-- **比對特定兩個 Turn 之間的差異**：
+- **Compare differences between consecutive turns**:
   ```bash
   git diff refs/wip/<branch>/current~1 refs/wip/<branch>/current
   ```
-- **讀取特定快照中的檔案內容（不影響工作區）**：
+- **Read file content from a specific snapshot (without touching workspace)**:
   ```bash
   git show refs/wip/<branch>/current:<file_path>
   ```
 
-### 2. 回退與復原操作 (Rollback & Recovery)
-- **單檔回退至上一個回合 (Turn - 1)**：
+### 2. Rollback & Recovery Operations
+- **Revert a single file to previous turn (Turn - 1)**:
   ```bash
   git checkout refs/wip/<branch>/current~1 -- <file_path>
   ```
-- **單檔回退至指定快照雜湊 (Snapshot Hash)**：
+- **Revert a single file to a specific snapshot hash**:
   ```bash
   git checkout <snapshot_hash> -- <file_path>
   ```
-- **全工作區回退至上一個回合**：
+- **Revert entire workspace to previous turn**:
   ```bash
   git checkout refs/wip/<branch>/current~1 -- .
   ```
-- **放棄所有回合，完全退回正式 HEAD 狀態**：
+- **Discard all turns and hard reset to official HEAD state**:
   ```bash
   git checkout HEAD -- .
   git clean -fd
