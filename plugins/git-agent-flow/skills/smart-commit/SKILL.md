@@ -24,11 +24,11 @@ The `/smart-commit` command analyzes current working directory modifications, cl
 3. **Execute Grouped Commit Execution**:
    - For multiple commit groups, construct a JSON array and run:
      ```powershell
-     pwsh -NoProfile -File ./scripts/git_smart_commit.ps1 -PlanJson '[{"message":"feat(core): ...","files":["file1","file2"]},{"message":"docs: ...","files":["README.md"]}]'
+     pwsh -NoProfile -File "$HOME/.gemini/config/plugins/git-agent-flow/scripts/git_smart_commit.ps1" -PlanJson '[{"message":"feat(core): ...","files":["file1","file2"]},{"message":"docs: ...","files":["README.md"]}]'
      ```
    - For a single atomic commit covering all changes:
      ```powershell
-     pwsh -NoProfile -File ./scripts/git_smart_commit.ps1 -Message "<type>(<scope>): <message>"
+     pwsh -NoProfile -File "$HOME/.gemini/config/plugins/git-agent-flow/scripts/git_smart_commit.ps1" -Message "<type>(<scope>): <message>"
      ```
 
 4. **Synchronize & Report**:
