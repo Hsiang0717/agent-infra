@@ -1,4 +1,0 @@
-{
-  "name": "git-wip",
-  "description": "Automatically creates WIP snapshots upon task completion and provides /git-wip-done to squash and clean up commits."
-}

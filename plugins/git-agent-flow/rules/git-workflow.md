@@ -6,10 +6,11 @@
 
 ## Workflow Directives
 1. **No Manual Intermediate Commits**: Do not spam `git commit` to `HEAD` during ongoing multi-turn tasks. The Stop Hook automatically updates the isolated Shadow WIP ref upon every turn.
-2. **Transaction Commit Boundary (`/git-wip-done`)**:
-   - When a clear milestone or task is completed, synthesize all changes into a single Conventional Commit.
-   - Run `/git-wip-done -Message "<type>(<scope>): <clear message>"` or draft the commit message and ask user confirmation.
-   - `/git-wip-done` creates exactly 1 formal commit on `HEAD` and archives the turn snapshots into `refs/wip/<branch>/archive/<timestamp>`.
+2. **Atomic & Semantic Commit Boundary (`/smart-commit`)**:
+   - When a milestone or task is completed, inspect changes across the workspace.
+   - Cluster modified files by architectural module and intent (e.g. `feat`, `fix`, `refactor`, `docs`).
+   - Execute `/smart-commit` (or provide plan JSON) to stage files in logical groups and generate clean, atomic Conventional Commits on `HEAD`.
+   - The shadow memory (`refs/wip/<branch>/current`) is automatically aligned to the latest `HEAD` and snapshots archived.
 
 ---
 
