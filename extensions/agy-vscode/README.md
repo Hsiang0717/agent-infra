@@ -18,11 +18,27 @@ A VS Code extension for quickly launching AGY CLI in a native terminal editor pa
 
 ### 🚀 Open AGY CLI
 
-Launches AGY CLI in a native VS Code terminal editor panel.
+Launches AGY CLI in a native VS Code terminal (editor panel or bottom panel).
 
-- Automatically detects `.venv` in the workspace root and activates it before starting `agy`
-- Prefers `pwsh` over `powershell.exe` on Windows with `-ExecutionPolicy Bypass`
-- Prevents double-activation conflicts with `VIRTUAL_ENV` / `CONDA_PREFIX`
+- **Zero Latency Startup**: Removed fixed sleep delays for responsive terminal initialization.
+- **Smart Virtual Environment Detection**: Automatically checks `.venv`, `venv`, VS Code Python interpreter settings, or a custom user path.
+- **Shell Optimization**: Prefers `pwsh` over `powershell.exe` on Windows with `-ExecutionPolicy Bypass`.
+- **Instance Management**: Supports reusing existing terminal or fresh restarts.
+- **Prevents Conflicts**: Isolates `VIRTUAL_ENV` / `CONDA_PREFIX` during terminal boot.
+
+---
+
+## Extension Settings
+
+This extension contributes the following settings:
+
+| Setting | Type | Default | Description |
+| :--- | :--- | :--- | :--- |
+| `agy.terminalLocation` | `string` | `"editor"` | Where to open the AGY terminal (`"editor"` or `"panel"`). |
+| `agy.reuseTerminal` | `boolean` | `false` | Reuse the existing AGY CLI terminal instead of restarting. |
+| `agy.customPath` | `string` | `""` | Custom path or executable name for AGY CLI (defaults to `agy`). |
+| `agy.customArguments` | `string` | `""` | Extra arguments passed to AGY CLI on startup. |
+| `agy.venvPath` | `string` | `""` | Custom virtual environment path (relative or absolute). |
 
 ---
 

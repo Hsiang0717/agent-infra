@@ -35,6 +35,40 @@
           "when": "true"
         }
       ]
+    },
+    "configuration": {
+      "title": "AGY CLI",
+      "properties": {
+        "agy.terminalLocation": {
+          "type": "string",
+          "enum": [
+            "editor",
+            "panel"
+          ],
+          "default": "editor",
+          "description": "Location where the AGY CLI terminal should be opened ('editor' or 'panel')."
+        },
+        "agy.reuseTerminal": {
+          "type": "boolean",
+          "default": false,
+          "description": "Reuse the existing AGY CLI terminal if it is already open instead of creating a new one."
+        },
+        "agy.customPath": {
+          "type": "string",
+          "default": "",
+          "description": "Custom path or executable name for AGY CLI (defaults to 'agy')."
+        },
+        "agy.customArguments": {
+          "type": "string",
+          "default": "",
+          "description": "Extra arguments passed to AGY CLI on startup."
+        },
+        "agy.venvPath": {
+          "type": "string",
+          "default": "",
+          "description": "Custom virtual environment path. If empty, automatically detects '.venv' in workspace root."
+        }
+      }
     }
   },
   "scripts": {
