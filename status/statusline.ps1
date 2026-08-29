@@ -24,16 +24,19 @@ try {
 
 
 
-    # Read JSON input from stdin safely
+    # Read JSON input from stdin or pipeline safely
     $inputJson = ""
     try {
-        if ([Console]::IsInputRedirected) {
-            $inputJson = [Console]::In.ReadToEnd()
+        $pipelineStr = $input | Out-String
+        if ($pipelineStr -and $pipelineStr.Trim().Length -gt 0) {
+            $inputJson = $pipelineStr
         }
     } catch {}
     if (-not $inputJson -or $inputJson.Trim().Length -eq 0) {
         try {
-            $inputJson = $input | Out-String
+            if ([Console]::IsInputRedirected) {
+                $inputJson = [Console]::In.ReadToEnd()
+            }
         } catch {}
     }
 
@@ -151,30 +154,42 @@ $GEMINI_WK_RESET = if ($data -and $data.quota -and $data.quota.'gemini-weekly' -
 $TP_5H_RESET = if ($data -and $data.quota -and $data.quota.'3p-5h' -and $data.quota.'3p-5h'.reset_in_seconds -ne $null) { [Math]::Max(0, [int](Safe-Double $data.quota.'3p-5h'.reset_in_seconds 0)) } else { -1 }
 $TP_WK_RESET = if ($data -and $data.quota -and $data.quota.'3p-weekly' -and $data.quota.'3p-weekly'.reset_in_seconds -ne $null) { [Math]::Max(0, [int](Safe-Double $data.quota.'3p-weekly'.reset_in_seconds 0)) } else { -1 }
 
-# ANSI Helpers
+# ANSI Helpers & Morandi Color Palette
 $ESC = [char]27
 $R = "$ESC[0m"
 $B = "$ESC[1m"
 $D = "$ESC[2m"
 $I = "$ESC[3m"
 
-$FG_BLACK = "$ESC[30m"
-$FG_RED = "$ESC[31m"
-$FG_GREEN = "$ESC[32m"
-$FG_YELLOW = "$ESC[33m"
-$FG_BLUE = "$ESC[34m"
-$FG_MAGENTA = "$ESC[35m"
-$FG_CYAN = "$ESC[36m"
-$FG_WHITE = "$ESC[37m"
+# Morandi Palette (TrueColor 24-bit ANSI: Low-saturation, soft grey-undertone)
+$FG_GRAY = "$ESC[38;2;125;135;145m"          # Muted slate grey (Borders, Separators, v-version)
+$FG_DIM_GRAY = "$ESC[38;2;75;85;95m"         # Deep muted slate (Unfilled progress bars)
+$FG_WHITE = "$ESC[38;2;215;215;215m"         # Soft neutral grey-white
+$FG_BRIGHT_WHITE = "$ESC[38;2;240;240;240m"  # Creamy white for highlighted numbers
 
-$FG_GRAY = "$ESC[90m"
-$FG_BRIGHT_RED = "$ESC[91m"
-$FG_BRIGHT_GREEN = "$ESC[92m"
-$FG_BRIGHT_YELLOW = "$ESC[93m"
-$FG_BRIGHT_BLUE = "$ESC[94m"
-$FG_BRIGHT_MAGENTA = "$ESC[95m"
-$FG_BRIGHT_CYAN = "$ESC[96m"
-$FG_BRIGHT_WHITE = "$ESC[97m"
+$FG_SAGE = "$ESC[38;2;145;175;155m"          # 鼠尾草綠 (Ready, AC, Good Quota)
+$FG_OAT = "$ESC[38;2;215;185;145m"           # 燕麥暖黃 (Thinking, Warning, Mid Context)
+$FG_FOG_BLUE = "$ESC[38;2;140;170;195m"      # 霧霾藍 (Working, Host, Artifacts)
+$FG_DUSTY_ROSE = "$ESC[38;2;195;155;170m"    # 煙燻粉藕 (Tool, Tasks, 7D Quota)
+$FG_TERRACOTTA = "$ESC[38;2;205;130;120m"    # 陶土磚紅 (Dirty branch, High Context, Low Quota)
+$FG_MUTED_CYAN = "$ESC[38;2;135;175;180m"    # 灰海青 / 天青 (CWD, Clean Git, Subagents, 5H Quota)
+$FG_LAVENDER = "$ESC[38;2;175;160;190m"      # 薰衣草灰紫 (Model display, badges)
+
+# ANSI Aliases mapped to Morandi Palette for compatibility
+$FG_BLACK = "$ESC[38;2;40;44;52m"
+$FG_RED = $FG_TERRACOTTA
+$FG_GREEN = $FG_SAGE
+$FG_YELLOW = $FG_OAT
+$FG_BLUE = $FG_FOG_BLUE
+$FG_MAGENTA = $FG_DUSTY_ROSE
+$FG_CYAN = $FG_MUTED_CYAN
+
+$FG_BRIGHT_RED = $FG_TERRACOTTA
+$FG_BRIGHT_GREEN = $FG_SAGE
+$FG_BRIGHT_YELLOW = $FG_OAT
+$FG_BRIGHT_BLUE = $FG_FOG_BLUE
+$FG_BRIGHT_MAGENTA = $FG_LAVENDER
+$FG_BRIGHT_CYAN = $FG_MUTED_CYAN
 
 $NUM_COLOR = "${FG_BRIGHT_WHITE}${B}"
 
@@ -506,14 +521,14 @@ if ($SANDBOX -eq $true) {
     }
 }
 
-# Context bar
-$BAR_LEN = 20
+# Context bar (Compact 10 blocks)
+$BAR_LEN = 10
 $FILLED = [int][Math]::Floor(($PCT_INT * $BAR_LEN) / 100)
 $REMAINDER = ($PCT_INT * $BAR_LEN) % 100
 
-$FILL_COLOR = $FG_YELLOW
-if ($PCT_INT -ge 90) { $FILL_COLOR = $FG_BRIGHT_RED }
-elseif ($PCT_INT -ge 60) { $FILL_COLOR = $FG_BRIGHT_YELLOW }
+$FILL_COLOR = $FG_MUTED_CYAN
+if ($PCT_INT -ge 90) { $FILL_COLOR = $FG_TERRACOTTA }
+elseif ($PCT_INT -ge 60) { $FILL_COLOR = $FG_OAT }
 
 if ($USE_CLASSIC_ICONS) {
     $BAR = ""
@@ -536,14 +551,14 @@ if ($USE_CLASSIC_ICONS) {
         if ($i -lt $FILLED) {
             $BAR += "${FILL_COLOR}█${R}"
         } elseif ($i -eq $FILLED) {
-            if ($REMAINDER -ge 75) { $BAR += "${FILL_COLOR}▓${R}${FG_GRAY}" }
-            elseif ($REMAINDER -ge 50) { $BAR += "${FILL_COLOR}▒${R}${FG_GRAY}" }
-            else { $BAR += "${FILL_COLOR}░${R}${FG_GRAY}" }
+            if ($REMAINDER -ge 75) { $BAR += "${FILL_COLOR}▓${R}${FG_DIM_GRAY}" }
+            elseif ($REMAINDER -ge 50) { $BAR += "${FILL_COLOR}▒${R}${FG_DIM_GRAY}" }
+            else { $BAR += "${FILL_COLOR}░${R}${FG_DIM_GRAY}" }
         } else {
-            $BAR += "${FG_GRAY}░${R}"
+            $BAR += "${FG_DIM_GRAY}░${R}"
         }
     }
-    $CTX_BAR = "${FG_YELLOW}${ICON_CONTEXT_BAR}  ${R}${BAR} ${NUM_COLOR}${PCT_FMT}%${R}"
+    $CTX_BAR = "${FG_OAT}${ICON_CONTEXT_BAR}  ${R}${BAR} ${NUM_COLOR}${PCT_FMT}%${R}"
 }
 
 # Stats badges
@@ -607,7 +622,7 @@ function make_quota_bar($val, $label, $bar_color, $reset_sec) {
     if ($USE_CLASSIC_ICONS) {
         $separator = "${FG_GRAY} · ${R}"
     } else {
-        $separator = "${FG_GRAY}| ${R}"
+        $separator = "${FG_GRAY} | ${R}"
     }
 
     if ($val -eq $null -or $val -lt 0) {
@@ -619,11 +634,11 @@ function make_quota_bar($val, $label, $bar_color, $reset_sec) {
     }
 
     $val_int = [int][Math]::Floor($val)
-    $text_color = $FG_BRIGHT_GREEN
-    if ($val_int -lt 20) { $text_color = $FG_BRIGHT_RED }
-    elseif ($val_int -lt 50) { $text_color = $FG_BRIGHT_YELLOW }
+    $text_color = $FG_SAGE
+    if ($val_int -lt 20) { $text_color = $FG_TERRACOTTA }
+    elseif ($val_int -lt 50) { $text_color = $FG_OAT }
 
-    $bar_len = 10
+    $bar_len = 8
     $filled = [int][Math]::Floor(($val_int * $bar_len) / 100)
     $remainder = ($val_int * $bar_len) % 100
 
@@ -642,16 +657,16 @@ function make_quota_bar($val, $label, $bar_color, $reset_sec) {
                 elseif ($remainder -ge 25) { $bar += "░" }
                 else { $bar += "·" }
             } else {
-                if ($remainder -ge 75) { $bar += "${bar_color}▓${R}${FG_GRAY}" }
-                elseif ($remainder -ge 50) { $bar += "${bar_color}▒${R}${FG_GRAY}" }
-                elseif ($remainder -ge 25) { $bar += "${bar_color}░${R}${FG_GRAY}" }
-                else { $bar += "${FG_GRAY}░${R}" }
+                if ($remainder -ge 75) { $bar += "${bar_color}▓${R}${FG_DIM_GRAY}" }
+                elseif ($remainder -ge 50) { $bar += "${bar_color}▒${R}${FG_DIM_GRAY}" }
+                elseif ($remainder -ge 25) { $bar += "${bar_color}░${R}${FG_DIM_GRAY}" }
+                else { $bar += "${FG_DIM_GRAY}░${R}" }
             }
         } else {
             if ($USE_CLASSIC_ICONS) {
                 $bar += "·"
             } else {
-                $bar += "${FG_GRAY}░${R}"
+                $bar += "${FG_DIM_GRAY}░${R}"
             }
         }
     }
@@ -730,18 +745,15 @@ $title = if ($width -lt 40) { " Status " } elseif ($width -lt 70) { " Antigravit
 $top_border = "${FG_GRAY}${BOX_TOP_L}${R}${title}${FG_GRAY}$("─" * [Math]::Max(0, $width - 4 - (visible_len $title)))${BOX_TOP_R}${R}"
 $bottom_border = "${FG_GRAY}${BOX_BOT_L}$("─" * [Math]::Max(0, $width - 4))${BOX_BOT_R}${R}"
 
-# Helper to format a single content line with borders and right alignment
 function Strip-Separator($str) {
     if (-not $str) { return "" }
-    $cleaned = $str
-    $cleaned = $cleaned -replace '^\x1b\[[0-9;]*m\s*[\|╱·]\s*\x1b\[[0-9;]*m', ''
-    $cleaned = $cleaned -replace '^\x1b\[[0-9;]*m\s*[\|╱·]\s*', ''
-    return $cleaned.Trim()
+    $cleaned = $str -replace '^\s*(\x1b\[[0-9;]*m\s*)*[\|╱·]\s*(\x1b\[[0-9;]*m\s*)*', ''
+    return $cleaned
 }
 
 function Has-Separator($str) {
     if (-not $str) { return $false }
-    return $str -match '^\x1b\[[0-9;]*m\s*[\|╱·]'
+    return $str -match '^\s*(\x1b\[[0-9;]*m\s*)*[\|╱·]'
 }
 
 function Format-FlexWrapLine($left_items, $right_items, $total_width) {
@@ -749,8 +761,16 @@ function Format-FlexWrapLine($left_items, $right_items, $total_width) {
     if ($max_content -lt 1) { $max_content = 1 }
     
     $left_str = ""
+    $is_first_left = $true
     foreach ($item in $left_items) {
-        if ($item -and (visible_len $item) -gt 0) { $left_str += $item }
+        if ($item -and (visible_len $item) -gt 0) {
+            if ($is_first_left) {
+                $left_str += Strip-Separator $item
+                $is_first_left = $false
+            } else {
+                $left_str += $item
+            }
+        }
     }
     $right_str = ""
     foreach ($item in $right_items) {
@@ -849,25 +869,30 @@ function Format-BoxLine($left, $right, $total_width) {
     return $lines -join "`n"
 }
 
-$DIR_LEFT = if ($CWD_SHORT) {
-    if ($USE_CLASSIC_ICONS) { "${FG_CYAN}${CWD_SHORT}${R}" }
-    else { "${FG_CYAN}${ICON_DIR} ${CWD_SHORT}${R}" }
+$DIR_FMT = if ($CWD_SHORT) {
+    if ($USE_CLASSIC_ICONS) { "${FG_MUTED_CYAN}${CWD_SHORT}${R}" }
+    else { "${FG_MUTED_CYAN}${ICON_DIR} ${CWD_SHORT}${R}" }
 } else { "" }
 
-# Unified RWD layout containing all telemetry information
-$L1_LEFT = @($S, $M)
-$L1_RIGHT = @($USER_FMT, $HOST_FMT, $CLI_VER_FMT)
+# 3-Row Clean Dashboard Layout
+# Row 1: Core Agent Identity, Model, Git branch (Left) | Working Directory (Right)
+$L1_LEFT = @($S, $M, $V)
+$L1_RIGHT = @($DIR_FMT)
 
+# Row 2: Context Window usage bar (Left) | Token Usage Metrics (Right)
 $L2_LEFT = @($CTX_BAR)
 $L2_RIGHT = @($TOK_DETAILS_WIDE)
 
-$L3_LEFT = @($DIR_LEFT)
-$L3_RIGHT = @($V, $CONV_FMT)
-
-$L4_LEFT = @($SB, $POWER_FMT, $Q_5H_FMT, $Q_WK_FMT)
-$L4_RIGHT = @(
-    $(if ($ARTIFACTS -gt 0) { $ART_FMT } else { "" })
-    $(if ($SUBAGENTS -gt 0) { "${DOT_L2}${SUB_FMT}" } else { "" })
+# Row 3: Quotas & Power (Left) | Sandbox, Artifacts, Subagents, Tasks (Right)
+$L3_LEFT = @(
+    $(if ($Q_5H_FMT) { $Q_5H_FMT } else { "" }),
+    $(if ($Q_WK_FMT) { $Q_WK_FMT } else { "" }),
+    $(if ($POWER_FMT) { $POWER_FMT } else { "" })
+)
+$L3_RIGHT = @(
+    $SB,
+    $(if ($ARTIFACTS -gt 0) { "${DOT_L2}${ART_FMT}" } else { "" }),
+    $(if ($SUBAGENTS -gt 0) { "${DOT_L2}${SUB_FMT}" } else { "" }),
     $(if ($BG_TASKS -gt 0) { "${DOT_L2}${BG_FMT}" } else { "" })
 )
 
@@ -875,9 +900,8 @@ $out1 = $top_border
 $out2 = Format-BoxLine $L1_LEFT $L1_RIGHT $width
 $out3 = Format-BoxLine $L2_LEFT $L2_RIGHT $width
 $out4 = Format-BoxLine $L3_LEFT $L3_RIGHT $width
-$out5 = Format-BoxLine $L4_LEFT $L4_RIGHT $width
-$out6 = $bottom_border
-Write-Output "${out1}`n${out2}`n${out3}`n${out4}`n${out5}`n${out6}"
+$out5 = $bottom_border
+Write-Output "${out1}`n${out2}`n${out3}`n${out4}`n${out5}"
 $global:LASTEXITCODE = 0
 exit 0
 } catch {
