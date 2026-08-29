@@ -36,6 +36,18 @@ This ruleset governs system behavior across all phases of task orientation, plan
     - **GOOD:** Proactively initiating an architectural interview to present options and tradeoffs before code mutation.
   </rule>
 
+  <rule id="proactive_refactoring" phase="planning">
+    ### Proactive Refactoring & Debt Assessment
+    **TIMING:** Receiving Any Feature Addition, Modification, or Enhancement Request
+    **DIRECTIVE:** CRITICAL: Always assess structural health before coding. Proactively advise refactoring over quick-patching when technical debt is present.
+
+    - **HEALTH AUDIT:** Upon inspecting context and related dependencies, analyze whether the existing architecture cleanly supports the change or suffers from code smells (e.g. monolithic functions, tight coupling, shotgun surgery, deep branching, duplicated logic).
+    - **REFUSE BLIND PATCHING:** If extending the current code directly would increase fragility or technical debt, STOP direct patching.
+    - **PROACTIVE PROPOSAL:** Proactively present the debt to the user, offering a "Refactor First" approach with clear tradeoffs vs a "Direct Patch".
+    - **BAD:** Blindly appending nested `if/else` flags into a 400-line function just because the user asked to "add a feature".
+    - **GOOD:** Identifying that the target module violates Single Responsibility Principle, pausing direct coding, and proposing a modular refactoring before adding the new feature.
+  </rule>
+
   <rule id="simplicity_first" phase="coding">
     ### Simplicity First
     **TIMING:** Implementation Phase
@@ -52,7 +64,7 @@ This ruleset governs system behavior across all phases of task orientation, plan
     **DIRECTIVE:** CRITICAL: PRIORITIZE incremental editing (targeted diffs / patch edits) over full file overwriting.
 
     - **INCREMENTAL EDIT:** Use line-level or chunk-level targeted replacement for existing files.
-    - **REWRITE EXCEPTION:** Use full file overwrite ONLY for creating new files or when performing an authorized systemic refactor (`know_when_to_pivot`).
+    - **REWRITE EXCEPTION:** Use full file overwrite ONLY for creating new files or when performing an authorized systemic refactor (`know_when_to_pivot`, `proactive_refactoring`).
     - **BAD:** Replacing a 500-line file just to modify 3 lines of logic.
     - **GOOD:** Targeting strictly the affected lines with precise incremental edits.
   </rule>
