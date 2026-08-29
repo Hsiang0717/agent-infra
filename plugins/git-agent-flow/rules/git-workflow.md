@@ -2,10 +2,10 @@
 
 ## Core Principles
 - **HEAD is human-accepted history**: `git log` must strictly contain clean, semantic, human-approved Conventional Commits.
-- **`refs/wip/*` is Agent memory**: Granular snapshots are automatically recorded in background shadow refs (`refs/wip/<branch>/current`) on every turn without modifying `HEAD` or interfering with user staging (`git add`).
+- **`refs/wip/*` is Shadow Snapshot & Agent Memory**: Granular snapshots are recorded on-demand in isolated shadow refs (`refs/wip/<branch>/current`) without modifying `HEAD` or interfering with user staging (`git add`).
 
 ## Workflow Directives
-1. **No Manual Intermediate Commits**: Do not spam `git commit` to `HEAD` during ongoing multi-turn tasks. The Stop Hook automatically updates the isolated Shadow WIP ref upon every turn.
+1. **On-Demand Snapshots**: Snapshots are created manually by user command (e.g. `/smart-commit snapshot [message]` or terminal alias `git-snap`) instead of background automatic hooks.
 2. **Atomic & Semantic Commit Boundary (`/smart-commit`)**:
    - When a milestone or task is completed, inspect changes across the workspace.
    - Cluster modified files by architectural module and intent (e.g. `feat`, `fix`, `refactor`, `docs`).

@@ -1,19 +1,5 @@
 {
   "git-agent-flow-hook": {
-    "enabled": true,
-    "PostInvocation": [
-      {
-        "type": "command",
-        "command": "pwsh -NoProfile -File \"$HOME/.gemini/config/plugins/git-agent-flow/scripts/git_on_stop.ps1\"",
-        "timeout": 15
-      }
-    ],
-    "Stop": [
-      {
-        "type": "command",
-        "command": "pwsh -NoProfile -File \"$HOME/.gemini/config/plugins/git-agent-flow/scripts/git_on_stop.ps1\"",
-        "timeout": 15
-      }
-    ]
+    "enabled": false
   }
 }

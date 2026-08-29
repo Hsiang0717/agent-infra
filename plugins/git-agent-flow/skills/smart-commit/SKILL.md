@@ -1,36 +1,55 @@
 ---
 name: smart-commit
-description: "Groups workspace changes by intent/module and generates clean, atomic Conventional Commits while keeping Agent shadow memory in sync."
-usage: "/smart-commit [commit_message]"
+description: "Manages Git Agent Flow: manual shadow snapshots, fast rollback, and grouping workspace changes into atomic Conventional Commits on HEAD."
+usage: "/smart-commit [commit_message] | /smart-commit snapshot [msg] | /smart-commit rollback [target] [file] | /smart-commit list"
 ---
 
 # /smart-commit Command Handler
 
-The `/smart-commit` command analyzes current working directory modifications, clusters them by intent/architectural module, and generates one or more atomic **Conventional Commits** on `HEAD`.
+The `/smart-commit` command manages shadow WIP snapshots, rollbacks, and atomic **Conventional Commits** on `HEAD`.
 
-## Workflow Execution Steps:
+## Sub-commands & Modes:
 
+### 1. Manual Shadow Snapshot (`/smart-commit snapshot [message]` or `/smart-commit snap`)
+Creates an isolated shadow snapshot in `refs/wip/<branch>/current` with an optional custom message without touching `HEAD` or user staging:
+```powershell
+pwsh -NoProfile -File "$HOME/.gemini/config/plugins/git-agent-flow/scripts/git_snapshot.ps1" -Message "<snapshot_description>"
+```
+
+### 2. Snapshot List & Inspection (`/smart-commit list`)
+Lists recent shadow snapshots:
+```powershell
+pwsh -NoProfile -File "$HOME/.gemini/config/plugins/git-agent-flow/scripts/git_rollback.ps1" -List
+```
+
+### 3. Fast Rollback (`/smart-commit rollback [target] [file]`)
+- Rollback entire workspace to previous turn (`~1`):
+  ```powershell
+  pwsh -NoProfile -File "$HOME/.gemini/config/plugins/git-agent-flow/scripts/git_rollback.ps1"
+  ```
+- Rollback a single file to previous turn:
+  ```powershell
+  pwsh -NoProfile -File "$HOME/.gemini/config/plugins/git-agent-flow/scripts/git_rollback.ps1" -File "<file_path>"
+  ```
+- Rollback to a specific snapshot ref or commit hash:
+  ```powershell
+  pwsh -NoProfile -File "$HOME/.gemini/config/plugins/git-agent-flow/scripts/git_rollback.ps1" -Target "<target_ref_or_hash>" -File "<file_path>"
+  ```
+
+### 4. Semantic Atomic Commit on HEAD (`/smart-commit [commit_message]`)
+Analyzes current working directory modifications, clusters them by intent/module, and generates atomic Conventional Commits:
 1. **Analyze Working Tree Changes**:
    - Inspect modified and untracked files using `git status --porcelain`.
-   - Read relevant diffs to understand the purpose of each change.
-
-2. **Formulate Semantic Commit Groups (Atomic Commits)**:
-   - Group files based on their functional context and modification intent (e.g., `feat`, `fix`, `refactor`, `docs`, `test`, `chore`).
-   - If user provided an explicit commit message:
-     - If all changes belong to that intent, use it as a single commit.
-     - If changes span multiple distinct areas, suggest/split into logical atomic commits.
-   - For each group, compose a standard **Conventional Commit** message: `<type>(<scope>): <clear descriptive summary>`.
-
-3. **Execute Grouped Commit Execution**:
-   - For multiple commit groups, construct a JSON array and run:
+   - Formulate Conventional Commit groups (`feat`, `fix`, `refactor`, `docs`, `test`, `chore`).
+2. **Execute Grouped Commit Execution**:
+   - For multiple commit groups:
      ```powershell
      pwsh -NoProfile -File "$HOME/.gemini/config/plugins/git-agent-flow/scripts/git_smart_commit.ps1" -PlanJson '[{"message":"feat(core): ...","files":["file1","file2"]},{"message":"docs: ...","files":["README.md"]}]'
      ```
-   - For a single atomic commit covering all changes:
+   - For a single atomic commit:
      ```powershell
      pwsh -NoProfile -File "$HOME/.gemini/config/plugins/git-agent-flow/scripts/git_smart_commit.ps1" -Message "<type>(<scope>): <message>"
      ```
-
-4. **Synchronize & Report**:
-   - The script automatically updates `refs/wip/<branch>/current` to align with the new `HEAD` and archives previous shadow snapshots.
-   - Report the created commits (`git log -n <count> --oneline`) and confirm clean working directory status.
+3. **Synchronize & Report**:
+   - Automatically aligns `refs/wip/<branch>/current` to the new `HEAD` and archives old snapshots.
+   - Report created commits and confirm clean status.
