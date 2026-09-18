@@ -1,0 +1,14 @@
+# Enforce LF endings across all platforms
+* text=auto eol=lf
+
+# Explicitly enforce LF on all shell scripts and node executables
+*.sh text eol=lf
+*.cjs text eol=lf
+*.js text eol=lf
+*.ts text eol=lf
+*.json text eol=lf
+*.md text eol=lf
+
+# Windows batch files must use CRLF
+*.bat text eol=crlf
+*.cmd text eol=crlf

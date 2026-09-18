@@ -8,3 +8,5 @@ node.DS_Store
 Thumbs.db
 *.tmp
 # test hook trigger/
+.gemini/
+.agents/
