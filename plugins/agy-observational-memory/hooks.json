@@ -1,0 +1,11 @@
+{
+  "om-context-injection": {
+    "PreInvocation": [
+      {
+        "type": "command",
+        "command": "node ./bin/om.cjs hook pre-invocation",
+        "timeout": 5
+      }
+    ]
+  }
+}

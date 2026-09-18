@@ -1,0 +1,28 @@
+{
+  "name": "agy-observational-memory",
+  "version": "1.0.0",
+  "description": "Ultra-lightweight deterministic dual-layer memory skill for Antigravity: observations, reflections, and instant context recall.",
+  "type": "commonjs",
+  "bin": {
+    "om": "./bin/om.cjs"
+  },
+  "scripts": {
+    "build": "node build.mjs",
+    "test": "node build.mjs && npx esbuild tests/om.test.ts --bundle --platform=node --outfile=dist/om.test.cjs && node --test dist/om.test.cjs"
+  },
+  "keywords": [
+    "antigravity",
+    "plugin",
+    "skill",
+    "observational-memory",
+    "ai-memory"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {},
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "esbuild": "^0.25.0",
+    "typescript": "^5.7.0"
+  }
+}
