@@ -58,6 +58,22 @@ function Get-GitStatus {
         return [pscustomobject]@{ Branch = ''; Dirty = $false; Available = $false }
     }
 
+    # Fast-path: check if .git exists in $Path or any parent directory
+    $current = $Path
+    $hasGit = $false
+    while ($current) {
+        if (Test-Path -LiteralPath (Join-Path $current '.git')) {
+            $hasGit = $true
+            break
+        }
+        $parent = Split-Path $current -Parent
+        if (-not $parent -or $parent -eq $current) { break }
+        $current = $parent
+    }
+    if (-not $hasGit) {
+        return [pscustomobject]@{ Branch = ''; Dirty = $false; Available = $false }
+    }
+
     $env:GIT_OPTIONAL_LOCKS = '0'
     $output = Invoke-GitWithTimeout -Path $Path -Arguments @('status', '--porcelain', '--branch') -TimeoutMs $TimeoutMs
     if (-not $output) {

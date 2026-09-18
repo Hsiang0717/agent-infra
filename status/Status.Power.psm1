@@ -5,7 +5,9 @@ function Get-PowerStatus {
     if ($env:OS -notlike '*Windows*' -and -not $env:COMPUTERNAME) { return $null }
 
     try {
-        Add-Type -AssemblyName System.Windows.Forms -ErrorAction Stop
+        if (-not ('System.Windows.Forms.SystemInformation' -as [type])) {
+            [void][System.Reflection.Assembly]::LoadWithPartialName('System.Windows.Forms')
+        }
         $status = [System.Windows.Forms.SystemInformation]::PowerStatus
         if (-not $status) { return $null }
 
