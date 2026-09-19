@@ -118,9 +118,50 @@ function hashId(content) {
   return (0, import_node_crypto2.createHash)("sha256").update(content).digest("hex").slice(0, 12);
 }
 
+// src/similarity.ts
+function hybridTokenize(text) {
+  const normalized = text.toLowerCase().replace(/[\r\n\t]+/g, " ").trim();
+  const tokens = /* @__PURE__ */ new Set();
+  const words = normalized.match(/[a-z0-9_]+/g) || [];
+  for (const w of words) {
+    if (w.length >= 2) {
+      tokens.add(w);
+    }
+  }
+  const cjkOnly = normalized.replace(/[a-z0-9_\-\.\/\s\p{P}\p{S}]/gu, "");
+  for (let i = 0; i < cjkOnly.length - 1; i++) {
+    tokens.add(cjkOnly.slice(i, i + 2));
+  }
+  if (cjkOnly.length === 1 && tokens.size === 0) {
+    tokens.add(cjkOnly);
+  }
+  return tokens;
+}
+function calculateSimilarity(textA, textB) {
+  const cleanA = textA.trim();
+  const cleanB = textB.trim();
+  if (cleanA === cleanB) return 1;
+  if (!cleanA || !cleanB) return 0;
+  const setA = hybridTokenize(cleanA);
+  const setB = hybridTokenize(cleanB);
+  if (setA.size === 0 || setB.size === 0) return 0;
+  let intersection = 0;
+  for (const token of setA) {
+    if (setB.has(token)) {
+      intersection++;
+    }
+  }
+  if (intersection === 0) return 0;
+  const overlap = intersection / Math.min(setA.size, setB.size);
+  const jaccard = intersection / (setA.size + setB.size - intersection);
+  return 0.7 * overlap + 0.3 * jaccard;
+}
+var DEDUPLICATION_SIMILARITY_THRESHOLD = 0.8;
+
 // src/storage.ts
 var CONTEXT_USAGE_INSTRUCTIONS = `These are condensed memories from earlier in this session.
 
+- Current Focus: active task target and immediate next action.
 - Reflections: stable, long-lived facts about the user, project, decisions, and constraints.
 - Observations: timestamped events from the conversation history, in chronological order. Observation lines include ids in brackets.
 
@@ -128,20 +169,31 @@ Treat these as past records. When entries conflict, the most recent observation 
 
 When exact source context is needed for precision or traceability, use 'om recall <id>' with the relevant observation or reflection id.
 
-Autonomous Memory Protocol:
-- Record: When a milestone or verification is completed, record via 'om record "<summary>" -r <level>'.
-- Prune: When prior observations are superseded, resolved, or refuted, proactively drop clutter via 'om drop <id1> <id2> ...'.
-- Guardrail: Never drop failure lessons (synthesize them to reflections first); never drop steps of ongoing, unverified tasks.
-- Synthesize: When multiple observations converge into a stable pattern or invariant, promote to durable reflection via 'om pin "<rule>"'.`;
-function renderSummary(reflections, observations) {
-  if (reflections.length === 0 && observations.length === 0) return "";
+Autonomous Memory Protocol & Trigger Rules:
+- On Milestone / Verification Pass: Run 'om checkpoint "<milestone>" --next "<next_action>"' or 'om record "<summary>" -r high [--resolves <ids>]'.
+- On Invariant / Constraint Finalized: Run 'om pin "<durable_rule>"' (automatically deduplicated/merged) or 'om pin "<rule>" --replace <id>'.
+- On Rule Deprecated: Run 'om unpin <id1> [id2 ...]'.
+- On Obsolete / Superseded Tasks: Pass '--resolves <id1,id2>' or run 'om drop <id1> <id2> ...'.
+- On Session Handoff / Clear: Update 'om focus "<goal>" --next "<action>"' to guarantee seamless cold-start continuity.`;
+function renderSummary(reflections, observations, focus) {
+  const hasReflections = reflections.length > 0;
+  const hasObservations = observations.length > 0;
+  const hasFocus = !!(focus && (focus.goal || focus.nextAction));
+  if (!hasReflections && !hasObservations && !hasFocus) return "";
   const parts = [CONTEXT_USAGE_INSTRUCTIONS];
-  if (reflections.length > 0) {
+  if (hasFocus && focus) {
+    const focusLines = [];
+    if (focus.goal) focusLines.push(`- Goal: ${focus.goal}`);
+    if (focus.nextAction) focusLines.push(`- Next Action: ${focus.nextAction}`);
+    parts.push(`## Current Focus & Next Steps
+${focusLines.join("\n")}`);
+  }
+  if (hasReflections) {
     const reflectionLines = reflections.map((r) => `[${r.id}] ${r.content}`).join("\n");
     parts.push(`## Reflections
 ${reflectionLines}`);
   }
-  if (observations.length > 0) {
+  if (hasObservations) {
     const observationLines = observations.map((o) => `[${o.id}] ${o.timestamp} [${o.relevance}] ${o.content}`).join("\n");
     parts.push(`## Observations
 ${observationLines}`);
@@ -278,12 +330,19 @@ var StorageManager = class _StorageManager {
     for (const ref of incoming.reflections || []) {
       refMap.set(ref.id, ref);
     }
+    let mergedFocus = void 0;
+    if (base.focus && incoming.focus) {
+      mergedFocus = (base.focus.updatedAt || "") >= (incoming.focus.updatedAt || "") ? base.focus : incoming.focus;
+    } else {
+      mergedFocus = incoming.focus || base.focus;
+    }
     const merged = {
       version: Math.max(base.version || 1, incoming.version || 1),
       conversationId: incoming.conversationId || base.conversationId,
       workspacePath: incoming.workspacePath || base.workspacePath,
       createdAt: base.createdAt || incoming.createdAt,
       updatedAt: (/* @__PURE__ */ new Date()).toISOString(),
+      focus: mergedFocus,
       activeObservations: Array.from(activeMap.values()),
       allObservations: Array.from(allMap.values()),
       reflections: Array.from(refMap.values()),
@@ -308,7 +367,7 @@ var StorageManager = class _StorageManager {
         currentLedger.version = (currentLedger.version || 0) + 1;
         currentLedger.updatedAt = (/* @__PURE__ */ new Date()).toISOString();
         atomicWriteFileSync(this.ledgerPath, JSON.stringify(currentLedger, null, 2));
-        const summary = renderSummary(currentLedger.reflections, currentLedger.activeObservations);
+        const summary = renderSummary(currentLedger.reflections, currentLedger.activeObservations, currentLedger.focus);
         atomicWriteFileSync(this.projectionPath, summary);
         this.syncProjectBaseline(currentLedger);
         return;
@@ -319,7 +378,7 @@ var StorageManager = class _StorageManager {
         currentLedger.version = (diskLedger.version || 0) + 1;
         currentLedger.updatedAt = (/* @__PURE__ */ new Date()).toISOString();
         atomicWriteFileSync(this.ledgerPath, JSON.stringify(currentLedger, null, 2));
-        const summary = renderSummary(currentLedger.reflections, currentLedger.activeObservations);
+        const summary = renderSummary(currentLedger.reflections, currentLedger.activeObservations, currentLedger.focus);
         atomicWriteFileSync(this.projectionPath, summary);
         this.syncProjectBaseline(currentLedger);
         return;
@@ -359,7 +418,23 @@ var StorageManager = class _StorageManager {
       atomicWriteFileSync(this.projectBaselinePath, JSON.stringify(baseline, null, 2));
     }
   }
-  recordObservation(conversationId, content, relevance = "medium", sourceStepIndices = []) {
+  setFocus(conversationId, goal, nextAction = "") {
+    const ledger = this.loadLedger(conversationId);
+    const focus = {
+      goal,
+      nextAction,
+      updatedAt: (/* @__PURE__ */ new Date()).toISOString()
+    };
+    ledger.focus = focus;
+    this.saveLedger(ledger);
+    return focus;
+  }
+  clearFocus(conversationId) {
+    const ledger = this.loadLedger(conversationId);
+    delete ledger.focus;
+    this.saveLedger(ledger);
+  }
+  recordObservation(conversationId, content, relevance = "medium", sourceStepIndices = [], resolvesIds = []) {
     const ledger = this.loadLedger(conversationId);
     const now = /* @__PURE__ */ new Date();
     const pad = (n) => n.toString().padStart(2, "0");
@@ -375,15 +450,86 @@ var StorageManager = class _StorageManager {
       tokenCount,
       conversationId
     };
+    const droppedIds = [];
+    if (resolvesIds.length > 0) {
+      const resolvesSet = new Set(resolvesIds);
+      ledger.activeObservations = ledger.activeObservations.filter((o) => {
+        if (resolvesSet.has(o.id)) {
+          droppedIds.push(o.id);
+          return false;
+        }
+        return true;
+      });
+      ledger.droppedObservationIds.push(...droppedIds);
+    }
     ledger.activeObservations.push(obs);
     ledger.allObservations.push(obs);
     this.saveLedger(ledger);
-    return obs;
+    return Object.assign(obs, { droppedIds });
   }
-  pinReflection(conversationId, content, supportingObservationIds = []) {
+  pinReflection(conversationId, content, supportingObservationIdsOrOptions) {
     const ledger = this.loadLedger(conversationId);
-    const id = hashId(`pin-${content}-${Date.now()}`);
     const tokenCount = estimateStringTokens(content) + 5;
+    let replaceId;
+    let supportingObservationIds = [];
+    let autoDeduplicate = true;
+    if (Array.isArray(supportingObservationIdsOrOptions)) {
+      supportingObservationIds = supportingObservationIdsOrOptions;
+    } else if (supportingObservationIdsOrOptions && typeof supportingObservationIdsOrOptions === "object") {
+      replaceId = supportingObservationIdsOrOptions.replaceId;
+      supportingObservationIds = supportingObservationIdsOrOptions.supportingObservationIds || [];
+      autoDeduplicate = supportingObservationIdsOrOptions.autoDeduplicate !== false;
+    }
+    if (replaceId) {
+      const existingIdx = ledger.reflections.findIndex((r) => r.id === replaceId);
+      if (existingIdx !== -1) {
+        const oldRef = ledger.reflections[existingIdx];
+        const mergedSupp = Array.from(/* @__PURE__ */ new Set([...oldRef.supportingObservationIds || [], ...supportingObservationIds]));
+        const updatedRef = {
+          id: replaceId,
+          content,
+          supportingObservationIds: mergedSupp,
+          tokenCount
+        };
+        ledger.reflections[existingIdx] = updatedRef;
+        this.saveLedger(ledger);
+        return Object.assign(updatedRef, {
+          action: "replaced",
+          replacedId: replaceId
+        });
+      }
+    }
+    if (autoDeduplicate && ledger.reflections.length > 0) {
+      let maxScore = 0;
+      let bestMatch = null;
+      let bestMatchIdx = -1;
+      for (let i = 0; i < ledger.reflections.length; i++) {
+        const existing = ledger.reflections[i];
+        const score = calculateSimilarity(content, existing.content);
+        if (score > maxScore) {
+          maxScore = score;
+          bestMatch = existing;
+          bestMatchIdx = i;
+        }
+      }
+      if (bestMatch && maxScore >= DEDUPLICATION_SIMILARITY_THRESHOLD) {
+        const mergedSupp = Array.from(/* @__PURE__ */ new Set([...bestMatch.supportingObservationIds || [], ...supportingObservationIds]));
+        const updatedRef = {
+          id: bestMatch.id,
+          content,
+          supportingObservationIds: mergedSupp,
+          tokenCount
+        };
+        ledger.reflections[bestMatchIdx] = updatedRef;
+        this.saveLedger(ledger);
+        return Object.assign(updatedRef, {
+          action: "merged",
+          replacedId: bestMatch.id,
+          similarityScore: maxScore
+        });
+      }
+    }
+    const id = hashId(`pin-${content}-${Date.now()}`);
     const ref = {
       id,
       content,
@@ -392,7 +538,52 @@ var StorageManager = class _StorageManager {
     };
     ledger.reflections.push(ref);
     this.saveLedger(ledger);
-    return ref;
+    return Object.assign(ref, { action: "created" });
+  }
+  unpinReflections(conversationId, ids) {
+    const ledger = this.loadLedger(conversationId);
+    const idSet = new Set(ids);
+    const unpinned = [];
+    ledger.reflections = ledger.reflections.filter((r) => {
+      if (idSet.has(r.id)) {
+        unpinned.push(r.id);
+        return false;
+      }
+      return true;
+    });
+    this.saveLedger(ledger);
+    if (this.projectBaselinePath && fs2.existsSync(this.projectBaselinePath)) {
+      try {
+        const raw = fs2.readFileSync(this.projectBaselinePath, "utf-8");
+        const baseline = JSON.parse(raw);
+        if (Array.isArray(baseline.reflections)) {
+          baseline.reflections = baseline.reflections.filter((r) => !idSet.has(r.id));
+          baseline.updatedAt = (/* @__PURE__ */ new Date()).toISOString();
+          atomicWriteFileSync(this.projectBaselinePath, JSON.stringify(baseline, null, 2));
+        }
+      } catch {
+      }
+    }
+    return {
+      unpinned,
+      remaining: ledger.reflections.length
+    };
+  }
+  checkpoint(conversationId, milestone, nextAction, options = {}) {
+    const { relevance = "high", resolvesIds = [], sourceStepIndices = [] } = options;
+    const obs = this.recordObservation(
+      conversationId,
+      milestone,
+      relevance,
+      sourceStepIndices,
+      resolvesIds
+    );
+    const focus = this.setFocus(conversationId, milestone, nextAction);
+    return {
+      observation: obs,
+      focus,
+      droppedIds: obs.droppedIds || []
+    };
   }
   dropObservations(conversationId, ids) {
     const ledger = this.loadLedger(conversationId);
@@ -423,7 +614,7 @@ var StorageManager = class _StorageManager {
       return fs2.readFileSync(this.projectionPath, "utf-8").trim();
     }
     const ledger = this.loadLedger(conversationId);
-    if (ledger.reflections.length > 0 || ledger.activeObservations.length > 0) {
+    if (ledger.reflections.length > 0 || ledger.activeObservations.length > 0 || ledger.focus && (ledger.focus.goal || ledger.focus.nextAction)) {
       if (fs2.existsSync(this.projectionPath)) {
         return fs2.readFileSync(this.projectionPath, "utf-8").trim();
       }
@@ -458,27 +649,36 @@ var StorageManager = class _StorageManager {
 // src/cli.ts
 function printUsage() {
   console.log(`
-Observational Memory CLI (Antigravity Skill-First)
+Observational Memory CLI 2.0 (Antigravity Skill-First)
 
 Usage:
   om status [workspace] [--json]                 Display memory stats, counts, and active storage
   om view [workspace] [--session <id>]           View active folded memory markdown projection
-  om record "<text>" [-r <level>] [--session <id>] Instantly record an atomic observation
-  om pin "<text>" [--session <id>]               Instantly pin a durable project-level reflection
+  om focus "<target>" [--next "<action>"]        Set or update current focus target & next step
+  om focus --clear                               Clear current focus target & next step
+  om checkpoint "<milestone>" --next "<action>"  Atomic settlement: record + update focus [+ resolves]
+  om record "<text>" [-r <level>] [--resolves <id1,id2>] Record an atomic observation & prune superseded
+  om pin "<text>" [--replace <id>]               Pin a durable reflection (auto-deduplicates & merges)
+  om unpin <id1> [id2 ...]                       Remove durable project reflection(s)
   om recall <id>                                 Deterministically recall details for a 12-char ID
   om drop <id1> [id2 ...] [--session <id>]       Prune specific observation IDs from active memory
   om hook pre-invocation                         PreInvocation lifecycle hook context injector
   om clear [workspace] [--session <id>]          Clear session observations (keeps reflections)
   om clear [workspace] --all                     Clear all memory including project reflections
 
-Relevance levels for record:
-  low, medium, high, critical (default: medium)
+Relevance levels for record / checkpoint:
+  low, medium, high, critical (default for record: medium, default for checkpoint: high)
 
 Examples:
   om status
   om view
+  om focus "Implementing AST validation" --next "Run unit test suite"
+  om checkpoint "AST Validator v2 implemented" --next "Write property tests" --resolves d4e5f6a1b2c3
   om record "Selected PostgreSQL over MySQL for JSONB support" -r high
+  om record "Refactored parser to AST" --resolves 23109baf1fbe,023ff2c2ab32
   om pin "Project uses Bun runtime and Vitest for testing"
+  om pin "Project uses Bun runtime and Vitest with coverage" --replace a1b2c3d4e5f6
+  om unpin a1b2c3d4e5f6
   om recall d4e5f6a1b2c3
   om drop d4e5f6a1b2c3 e5f6a1b2c3d4
   om clear
@@ -538,9 +738,14 @@ async function runCli() {
     return void 0;
   };
   const explicitSession = getFlagValue(["--session", "-s"]);
-  const explicitRelevance = getFlagValue(["--relevance", "-r"]) || "medium";
+  const explicitRelevance = getFlagValue(["--relevance", "-r"]);
+  const nextActionFlag = getFlagValue(["--next", "-n"]);
+  const replaceIdFlag = getFlagValue(["--replace"]);
+  const resolvesFlag = getFlagValue(["--resolves"]);
   const isJson = args.includes("--json");
   const isAll = args.includes("--all");
+  const isClearFlag = args.includes("--clear");
+  const parsedResolvesIds = resolvesFlag ? resolvesFlag.split(",").map((s) => s.trim()).filter(Boolean) : [];
   const nonFlagArgs = args.filter((a) => !a.startsWith("-"));
   let explicitWorkspace;
   if (["status", "view", "clear"].includes(command) && nonFlagArgs.length > 1) {
@@ -600,12 +805,14 @@ ${projection}
     let activeObsCount = 0;
     let totalRecorded = 0;
     let reflectionsCount = 0;
+    let currentFocus;
     if (fs3.existsSync(storage.ledgerPath)) {
       try {
         const ledger = JSON.parse(fs3.readFileSync(storage.ledgerPath, "utf-8"));
         activeObsCount = ledger.activeObservations?.length || 0;
         totalRecorded = ledger.allObservations?.length || 0;
         reflectionsCount = ledger.reflections?.length || 0;
+        currentFocus = ledger.focus;
       } catch {
       }
     }
@@ -622,12 +829,14 @@ ${projection}
         JSON.stringify(
           {
             architecture: "skill-first",
+            version: "2.0.0",
             workspaceRoot: paths.workspaceRoot || null,
             workspaceHash: paths.workspaceHash,
             conversationId,
             projectBaselinePath: paths.projectReflectionsPath || null,
             activeLedgerPath: paths.activeLedgerPath,
             sessionStoreDir: paths.sessionStoreDir,
+            focus: currentFocus || null,
             activeObservationsCount: activeObsCount,
             totalRecordedObservations: totalRecorded,
             sessionReflectionsCount: reflectionsCount,
@@ -639,24 +848,30 @@ ${projection}
       );
       return;
     }
-    console.log("=== Observational Memory Status ===");
+    console.log("=== Observational Memory Status (v2.0) ===");
     console.log(`Architecture:               Skill-First (Zero-Config)`);
     console.log(`Workspace Root:             ${paths.workspaceRoot || "(none - global mode)"}`);
     console.log(`Active Session ID:          ${conversationId}`);
+    if (currentFocus) {
+      console.log(`Current Target Focus:       ${currentFocus.goal}`);
+      console.log(`Immediate Next Action:      ${currentFocus.nextAction || "(none specified)"}`);
+    } else {
+      console.log(`Current Focus:              (idle / not set)`);
+    }
     console.log(`Project Baseline Path:      ${paths.projectReflectionsPath || "(none)"}`);
     console.log(`Active Workspace Ledger:    ${paths.activeLedgerPath}`);
     console.log(`Active Observations:        ${activeObsCount} items`);
     console.log(`Total Recorded Observations:${totalRecorded} items`);
     console.log(`Session Reflections:        ${reflectionsCount} items`);
     console.log(`Project Baseline Facts:     ${baselineCount} items`);
-    console.log("===================================");
+    console.log("==========================================");
     return;
   }
   if (command === "view") {
     const projection = storage.readProjection();
     if (!projection) {
       console.log(`No active observations or reflections recorded yet for session [${conversationId}].`);
-      console.log(`Use 'om record "<text>"' or 'om pin "<text>"' to add memories.`);
+      console.log(`Use 'om checkpoint', 'om record', 'om focus', or 'om pin' to add memories.`);
       return;
     }
     console.log(`=== Active Folded Memory Projection [${conversationId}] ===
@@ -665,27 +880,89 @@ ${projection}
     console.log("\n==========================================================");
     return;
   }
+  if (command === "focus") {
+    if (isClearFlag) {
+      storage.clearFocus(conversationId);
+      console.log(`[OK] Cleared current focus for session [${conversationId}].`);
+      return;
+    }
+    const targetGoal = nonFlagArgs[1];
+    if (!targetGoal) {
+      console.error('Error: Missing target for focus. Usage: om focus "<target>" [--next "<action>"] or om focus --clear');
+      process.exit(1);
+    }
+    const nextAction = nextActionFlag || "";
+    const focus = storage.setFocus(conversationId, targetGoal, nextAction);
+    console.log(`[OK] Updated Current Focus:`);
+    console.log(`  Target: ${focus.goal}`);
+    if (focus.nextAction) {
+      console.log(`  Next:   ${focus.nextAction}`);
+    }
+    return;
+  }
+  if (command === "checkpoint") {
+    const milestone = nonFlagArgs[1];
+    if (!milestone) {
+      console.error('Error: Missing milestone summary for checkpoint. Usage: om checkpoint "<milestone>" --next "<action>" [--resolves <id1,id2>]');
+      process.exit(1);
+    }
+    const nextAction = nextActionFlag || "";
+    const relevance = explicitRelevance || "high";
+    const result = storage.checkpoint(conversationId, milestone, nextAction, {
+      relevance,
+      resolvesIds: parsedResolvesIds
+    });
+    console.log(`[OK] Checkpoint settled [${result.observation.id}] (${result.observation.relevance}): "${result.observation.content}"`);
+    if (result.droppedIds.length > 0) {
+      console.log(`  Auto-resolved & dropped ${result.droppedIds.length} superseded observation(s): ${result.droppedIds.map((id) => `[${id}]`).join(", ")}`);
+    }
+    console.log(`  Active Focus updated -> Next Action: "${result.focus.nextAction || result.focus.goal}"`);
+    return;
+  }
   if (command === "record") {
     const text = nonFlagArgs[1];
     if (!text) {
-      console.error('Error: Missing text for record. Usage: om record "<text>" [-r <level>]');
+      console.error('Error: Missing text for record. Usage: om record "<text>" [-r <level>] [--resolves <id1,id2>]');
       process.exit(1);
     }
-    const obs = storage.recordObservation(conversationId, text, explicitRelevance);
+    const relevance = explicitRelevance || "medium";
+    const obs = storage.recordObservation(conversationId, text, relevance, [], parsedResolvesIds);
     console.log(`[OK] Recorded observation [${obs.id}] (${obs.relevance}): "${obs.content}"`);
+    if (obs.droppedIds && obs.droppedIds.length > 0) {
+      console.log(`  Auto-resolved & dropped ${obs.droppedIds.length} superseded observation(s): ${obs.droppedIds.map((id) => `[${id}]`).join(", ")}`);
+    }
     return;
   }
   if (command === "pin") {
     const text = nonFlagArgs[1];
     if (!text) {
-      console.error('Error: Missing text for pin. Usage: om pin "<text>"');
+      console.error('Error: Missing text for pin. Usage: om pin "<text>" [--replace <id>]');
       process.exit(1);
     }
-    const ref = storage.pinReflection(conversationId, text);
-    console.log(`[OK] Pinned reflection [${ref.id}]: "${ref.content}"`);
+    const result = storage.pinReflection(conversationId, text, {
+      replaceId: replaceIdFlag,
+      autoDeduplicate: true
+    });
+    if (result.action === "replaced") {
+      console.log(`[OK] Explicitly replaced reflection [${result.id}] with new content: "${result.content}"`);
+    } else if (result.action === "merged") {
+      console.log(`[OK] Deduplicated & updated existing reflection [${result.id}] (similarity: ${(result.similarityScore * 100).toFixed(1)}%): "${result.content}"`);
+    } else {
+      console.log(`[OK] Pinned new reflection [${result.id}]: "${result.content}"`);
+    }
     if (paths.projectReflectionsPath) {
       console.log(`Synced to: ${paths.projectReflectionsPath}`);
     }
+    return;
+  }
+  if (command === "unpin") {
+    const idsToUnpin = nonFlagArgs.slice(1);
+    if (idsToUnpin.length === 0) {
+      console.error("Error: Missing IDs to unpin. Usage: om unpin <id1> [id2 ...]");
+      process.exit(1);
+    }
+    const result = storage.unpinReflections(conversationId, idsToUnpin);
+    console.log(`[OK] Unpinned ${result.unpinned.length} reflection(s). ${result.remaining} reflection(s) remaining.`);
     return;
   }
   if (command === "drop") {

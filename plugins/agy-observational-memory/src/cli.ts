@@ -2,31 +2,40 @@ import * as path from "node:path";
 import * as fs from "node:fs";
 import { findWorkspaceRoot, resolveStoragePaths } from "./config.js";
 import { StorageManager } from "./storage.js";
-import type { Observation, Reflection, Relevance, ProjectBaseline } from "./types.js";
+import type { Observation, Reflection, Relevance, ProjectBaseline, FocusState } from "./types.js";
 
 function printUsage() {
   console.log(`
-Observational Memory CLI (Antigravity Skill-First)
+Observational Memory CLI 2.0 (Antigravity Skill-First)
 
 Usage:
   om status [workspace] [--json]                 Display memory stats, counts, and active storage
   om view [workspace] [--session <id>]           View active folded memory markdown projection
-  om record "<text>" [-r <level>] [--session <id>] Instantly record an atomic observation
-  om pin "<text>" [--session <id>]               Instantly pin a durable project-level reflection
+  om focus "<target>" [--next "<action>"]        Set or update current focus target & next step
+  om focus --clear                               Clear current focus target & next step
+  om checkpoint "<milestone>" --next "<action>"  Atomic settlement: record + update focus [+ resolves]
+  om record "<text>" [-r <level>] [--resolves <id1,id2>] Record an atomic observation & prune superseded
+  om pin "<text>" [--replace <id>]               Pin a durable reflection (auto-deduplicates & merges)
+  om unpin <id1> [id2 ...]                       Remove durable project reflection(s)
   om recall <id>                                 Deterministically recall details for a 12-char ID
   om drop <id1> [id2 ...] [--session <id>]       Prune specific observation IDs from active memory
   om hook pre-invocation                         PreInvocation lifecycle hook context injector
   om clear [workspace] [--session <id>]          Clear session observations (keeps reflections)
   om clear [workspace] --all                     Clear all memory including project reflections
 
-Relevance levels for record:
-  low, medium, high, critical (default: medium)
+Relevance levels for record / checkpoint:
+  low, medium, high, critical (default for record: medium, default for checkpoint: high)
 
 Examples:
   om status
   om view
+  om focus "Implementing AST validation" --next "Run unit test suite"
+  om checkpoint "AST Validator v2 implemented" --next "Write property tests" --resolves d4e5f6a1b2c3
   om record "Selected PostgreSQL over MySQL for JSONB support" -r high
+  om record "Refactored parser to AST" --resolves 23109baf1fbe,023ff2c2ab32
   om pin "Project uses Bun runtime and Vitest for testing"
+  om pin "Project uses Bun runtime and Vitest with coverage" --replace a1b2c3d4e5f6
+  om unpin a1b2c3d4e5f6
   om recall d4e5f6a1b2c3
   om drop d4e5f6a1b2c3 e5f6a1b2c3d4
   om clear
@@ -99,9 +108,17 @@ export async function runCli(): Promise<void> {
   };
 
   const explicitSession = getFlagValue(["--session", "-s"]);
-  const explicitRelevance = (getFlagValue(["--relevance", "-r"]) || "medium") as Relevance;
+  const explicitRelevance = getFlagValue(["--relevance", "-r"]) as Relevance | undefined;
+  const nextActionFlag = getFlagValue(["--next", "-n"]);
+  const replaceIdFlag = getFlagValue(["--replace"]);
+  const resolvesFlag = getFlagValue(["--resolves"]);
   const isJson = args.includes("--json");
   const isAll = args.includes("--all");
+  const isClearFlag = args.includes("--clear");
+
+  const parsedResolvesIds: string[] = resolvesFlag
+    ? resolvesFlag.split(",").map((s) => s.trim()).filter(Boolean)
+    : [];
 
   // Positional workspace path if passed
   const nonFlagArgs = args.filter((a) => !a.startsWith("-"));
@@ -129,7 +146,6 @@ export async function runCli(): Promise<void> {
         }
 
         // Optimization: Only inject on User Turn (invocationNum === 0 or undefined).
-        // Intermediate tool execution turns (invocationNum > 0) skip injection to save tokens and eliminate latency.
         if (typeof hookInput.invocationNum === "number" && hookInput.invocationNum > 0) {
           console.log(JSON.stringify({ injectSteps: [] }));
           return;
@@ -179,6 +195,7 @@ export async function runCli(): Promise<void> {
     let activeObsCount = 0;
     let totalRecorded = 0;
     let reflectionsCount = 0;
+    let currentFocus: FocusState | undefined;
 
     if (fs.existsSync(storage.ledgerPath)) {
       try {
@@ -186,6 +203,7 @@ export async function runCli(): Promise<void> {
         activeObsCount = ledger.activeObservations?.length || 0;
         totalRecorded = ledger.allObservations?.length || 0;
         reflectionsCount = ledger.reflections?.length || 0;
+        currentFocus = ledger.focus;
       } catch {}
     }
 
@@ -202,12 +220,14 @@ export async function runCli(): Promise<void> {
         JSON.stringify(
           {
             architecture: "skill-first",
+            version: "2.0.0",
             workspaceRoot: paths.workspaceRoot || null,
             workspaceHash: paths.workspaceHash,
             conversationId,
             projectBaselinePath: paths.projectReflectionsPath || null,
             activeLedgerPath: paths.activeLedgerPath,
             sessionStoreDir: paths.sessionStoreDir,
+            focus: currentFocus || null,
             activeObservationsCount: activeObsCount,
             totalRecordedObservations: totalRecorded,
             sessionReflectionsCount: reflectionsCount,
@@ -220,17 +240,23 @@ export async function runCli(): Promise<void> {
       return;
     }
 
-    console.log("=== Observational Memory Status ===");
+    console.log("=== Observational Memory Status (v2.0) ===");
     console.log(`Architecture:               Skill-First (Zero-Config)`);
     console.log(`Workspace Root:             ${paths.workspaceRoot || "(none - global mode)"}`);
     console.log(`Active Session ID:          ${conversationId}`);
+    if (currentFocus) {
+      console.log(`Current Target Focus:       ${currentFocus.goal}`);
+      console.log(`Immediate Next Action:      ${currentFocus.nextAction || "(none specified)"}`);
+    } else {
+      console.log(`Current Focus:              (idle / not set)`);
+    }
     console.log(`Project Baseline Path:      ${paths.projectReflectionsPath || "(none)"}`);
     console.log(`Active Workspace Ledger:    ${paths.activeLedgerPath}`);
     console.log(`Active Observations:        ${activeObsCount} items`);
     console.log(`Total Recorded Observations:${totalRecorded} items`);
     console.log(`Session Reflections:        ${reflectionsCount} items`);
     console.log(`Project Baseline Facts:     ${baselineCount} items`);
-    console.log("===================================");
+    console.log("==========================================");
     return;
   }
 
@@ -238,7 +264,7 @@ export async function runCli(): Promise<void> {
     const projection = storage.readProjection();
     if (!projection) {
       console.log(`No active observations or reflections recorded yet for session [${conversationId}].`);
-      console.log(`Use 'om record "<text>"' or 'om pin "<text>"' to add memories.`);
+      console.log(`Use 'om checkpoint', 'om record', 'om focus', or 'om pin' to add memories.`);
       return;
     }
     console.log(`=== Active Folded Memory Projection [${conversationId}] ===\n`);
@@ -247,30 +273,103 @@ export async function runCli(): Promise<void> {
     return;
   }
 
-  if (command === "record") {
-    const text = nonFlagArgs[1];
-    if (!text) {
-      console.error("Error: Missing text for record. Usage: om record \"<text>\" [-r <level>]");
+  if (command === "focus") {
+    if (isClearFlag) {
+      storage.clearFocus(conversationId);
+      console.log(`[OK] Cleared current focus for session [${conversationId}].`);
+      return;
+    }
+
+    const targetGoal = nonFlagArgs[1];
+    if (!targetGoal) {
+      console.error("Error: Missing target for focus. Usage: om focus \"<target>\" [--next \"<action>\"] or om focus --clear");
       process.exit(1);
     }
 
-    const obs = storage.recordObservation(conversationId, text, explicitRelevance);
+    const nextAction = nextActionFlag || "";
+    const focus = storage.setFocus(conversationId, targetGoal, nextAction);
+    console.log(`[OK] Updated Current Focus:`);
+    console.log(`  Target: ${focus.goal}`);
+    if (focus.nextAction) {
+      console.log(`  Next:   ${focus.nextAction}`);
+    }
+    return;
+  }
+
+  if (command === "checkpoint") {
+    const milestone = nonFlagArgs[1];
+    if (!milestone) {
+      console.error("Error: Missing milestone summary for checkpoint. Usage: om checkpoint \"<milestone>\" --next \"<action>\" [--resolves <id1,id2>]");
+      process.exit(1);
+    }
+
+    const nextAction = nextActionFlag || "";
+    const relevance: Relevance = explicitRelevance || "high";
+
+    const result = storage.checkpoint(conversationId, milestone, nextAction, {
+      relevance,
+      resolvesIds: parsedResolvesIds,
+    });
+
+    console.log(`[OK] Checkpoint settled [${result.observation.id}] (${result.observation.relevance}): "${result.observation.content}"`);
+    if (result.droppedIds.length > 0) {
+      console.log(`  Auto-resolved & dropped ${result.droppedIds.length} superseded observation(s): ${result.droppedIds.map((id) => `[${id}]`).join(", ")}`);
+    }
+    console.log(`  Active Focus updated -> Next Action: "${result.focus.nextAction || result.focus.goal}"`);
+    return;
+  }
+
+  if (command === "record") {
+    const text = nonFlagArgs[1];
+    if (!text) {
+      console.error("Error: Missing text for record. Usage: om record \"<text>\" [-r <level>] [--resolves <id1,id2>]");
+      process.exit(1);
+    }
+
+    const relevance: Relevance = explicitRelevance || "medium";
+    const obs = storage.recordObservation(conversationId, text, relevance, [], parsedResolvesIds);
     console.log(`[OK] Recorded observation [${obs.id}] (${obs.relevance}): "${obs.content}"`);
+    if (obs.droppedIds && obs.droppedIds.length > 0) {
+      console.log(`  Auto-resolved & dropped ${obs.droppedIds.length} superseded observation(s): ${obs.droppedIds.map((id) => `[${id}]`).join(", ")}`);
+    }
     return;
   }
 
   if (command === "pin") {
     const text = nonFlagArgs[1];
     if (!text) {
-      console.error("Error: Missing text for pin. Usage: om pin \"<text>\"");
+      console.error("Error: Missing text for pin. Usage: om pin \"<text>\" [--replace <id>]");
       process.exit(1);
     }
 
-    const ref = storage.pinReflection(conversationId, text);
-    console.log(`[OK] Pinned reflection [${ref.id}]: "${ref.content}"`);
+    const result = storage.pinReflection(conversationId, text, {
+      replaceId: replaceIdFlag,
+      autoDeduplicate: true,
+    });
+
+    if (result.action === "replaced") {
+      console.log(`[OK] Explicitly replaced reflection [${result.id}] with new content: "${result.content}"`);
+    } else if (result.action === "merged") {
+      console.log(`[OK] Deduplicated & updated existing reflection [${result.id}] (similarity: ${(result.similarityScore! * 100).toFixed(1)}%): "${result.content}"`);
+    } else {
+      console.log(`[OK] Pinned new reflection [${result.id}]: "${result.content}"`);
+    }
+
     if (paths.projectReflectionsPath) {
       console.log(`Synced to: ${paths.projectReflectionsPath}`);
     }
+    return;
+  }
+
+  if (command === "unpin") {
+    const idsToUnpin = nonFlagArgs.slice(1);
+    if (idsToUnpin.length === 0) {
+      console.error("Error: Missing IDs to unpin. Usage: om unpin <id1> [id2 ...]");
+      process.exit(1);
+    }
+
+    const result = storage.unpinReflections(conversationId, idsToUnpin);
+    console.log(`[OK] Unpinned ${result.unpinned.length} reflection(s). ${result.remaining} reflection(s) remaining.`);
     return;
   }
 

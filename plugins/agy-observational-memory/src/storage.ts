@@ -1,11 +1,13 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
-import type { Observation, Reflection, SessionLedger, ProjectBaseline, Relevance, StoragePaths } from "./types.js";
+import type { Observation, Reflection, SessionLedger, ProjectBaseline, Relevance, StoragePaths, FocusState } from "./types.js";
 import { estimateStringTokens } from "./tokens.js";
 import { hashId } from "./ids.js";
+import { calculateSimilarity, DEDUPLICATION_SIMILARITY_THRESHOLD } from "./similarity.js";
 
 const CONTEXT_USAGE_INSTRUCTIONS = `These are condensed memories from earlier in this session.
 
+- Current Focus: active task target and immediate next action.
 - Reflections: stable, long-lived facts about the user, project, decisions, and constraints.
 - Observations: timestamped events from the conversation history, in chronological order. Observation lines include ids in brackets.
 
@@ -13,28 +15,43 @@ Treat these as past records. When entries conflict, the most recent observation 
 
 When exact source context is needed for precision or traceability, use 'om recall <id>' with the relevant observation or reflection id.
 
-Autonomous Memory Protocol:
-- Record: When a milestone or verification is completed, record via 'om record "<summary>" -r <level>'.
-- Prune: When prior observations are superseded, resolved, or refuted, proactively drop clutter via 'om drop <id1> <id2> ...'.
-- Guardrail: Never drop failure lessons (synthesize them to reflections first); never drop steps of ongoing, unverified tasks.
-- Synthesize: When multiple observations converge into a stable pattern or invariant, promote to durable reflection via 'om pin "<rule>"'.`;
+Autonomous Memory Protocol & Trigger Rules:
+- On Milestone / Verification Pass: Run 'om checkpoint "<milestone>" --next "<next_action>"' or 'om record "<summary>" -r high [--resolves <ids>]'.
+- On Invariant / Constraint Finalized: Run 'om pin "<durable_rule>"' (automatically deduplicated/merged) or 'om pin "<rule>" --replace <id>'.
+- On Rule Deprecated: Run 'om unpin <id1> [id2 ...]'.
+- On Obsolete / Superseded Tasks: Pass '--resolves <id1,id2>' or run 'om drop <id1> <id2> ...'.
+- On Session Handoff / Clear: Update 'om focus "<goal>" --next "<action>"' to guarantee seamless cold-start continuity.`;
 
-export function renderSummary(reflections: Reflection[], observations: Observation[]): string {
-  if (reflections.length === 0 && observations.length === 0) return "";
+export function renderSummary(reflections: Reflection[], observations: Observation[], focus?: FocusState): string {
+  const hasReflections = reflections.length > 0;
+  const hasObservations = observations.length > 0;
+  const hasFocus = !!(focus && (focus.goal || focus.nextAction));
+
+  if (!hasReflections && !hasObservations && !hasFocus) return "";
 
   const parts: string[] = [CONTEXT_USAGE_INSTRUCTIONS];
-  if (reflections.length > 0) {
+
+  if (hasFocus && focus) {
+    const focusLines: string[] = [];
+    if (focus.goal) focusLines.push(`- Goal: ${focus.goal}`);
+    if (focus.nextAction) focusLines.push(`- Next Action: ${focus.nextAction}`);
+    parts.push(`## Current Focus & Next Steps\n${focusLines.join("\n")}`);
+  }
+
+  if (hasReflections) {
     const reflectionLines = reflections
       .map((r) => `[${r.id}] ${r.content}`)
       .join("\n");
     parts.push(`## Reflections\n${reflectionLines}`);
   }
-  if (observations.length > 0) {
+
+  if (hasObservations) {
     const observationLines = observations
       .map((o) => `[${o.id}] ${o.timestamp} [${o.relevance}] ${o.content}`)
       .join("\n");
     parts.push(`## Observations\n${observationLines}`);
   }
+
   return parts.join("\n\n");
 }
 
@@ -53,6 +70,16 @@ function atomicWriteFileSync(targetPath: string, content: string): void {
       } catch {}
     }
   }
+}
+
+export interface PinReflectionResult extends Reflection {
+  action: "created" | "replaced" | "merged";
+  replacedId?: string;
+  similarityScore?: number;
+}
+
+export interface RecordObservationResult extends Observation {
+  droppedIds?: string[];
 }
 
 export class StorageManager {
@@ -190,12 +217,20 @@ export class StorageManager {
       refMap.set(ref.id, ref);
     }
 
+    let mergedFocus: FocusState | undefined = undefined;
+    if (base.focus && incoming.focus) {
+      mergedFocus = (base.focus.updatedAt || "") >= (incoming.focus.updatedAt || "") ? base.focus : incoming.focus;
+    } else {
+      mergedFocus = incoming.focus || base.focus;
+    }
+
     const merged: SessionLedger = {
       version: Math.max(base.version || 1, incoming.version || 1),
       conversationId: incoming.conversationId || base.conversationId,
       workspacePath: incoming.workspacePath || base.workspacePath,
       createdAt: base.createdAt || incoming.createdAt,
       updatedAt: new Date().toISOString(),
+      focus: mergedFocus,
       activeObservations: Array.from(activeMap.values()),
       allObservations: Array.from(allMap.values()),
       reflections: Array.from(refMap.values()),
@@ -227,7 +262,7 @@ export class StorageManager {
 
         atomicWriteFileSync(this.ledgerPath, JSON.stringify(currentLedger, null, 2));
 
-        const summary = renderSummary(currentLedger.reflections, currentLedger.activeObservations);
+        const summary = renderSummary(currentLedger.reflections, currentLedger.activeObservations, currentLedger.focus);
         atomicWriteFileSync(this.projectionPath, summary);
 
         this.syncProjectBaseline(currentLedger);
@@ -243,7 +278,7 @@ export class StorageManager {
         currentLedger.updatedAt = new Date().toISOString();
         atomicWriteFileSync(this.ledgerPath, JSON.stringify(currentLedger, null, 2));
 
-        const summary = renderSummary(currentLedger.reflections, currentLedger.activeObservations);
+        const summary = renderSummary(currentLedger.reflections, currentLedger.activeObservations, currentLedger.focus);
         atomicWriteFileSync(this.projectionPath, summary);
 
         this.syncProjectBaseline(currentLedger);
@@ -289,12 +324,31 @@ export class StorageManager {
     }
   }
 
+  setFocus(conversationId: string, goal: string, nextAction: string = ""): FocusState {
+    const ledger = this.loadLedger(conversationId);
+    const focus: FocusState = {
+      goal,
+      nextAction,
+      updatedAt: new Date().toISOString(),
+    };
+    ledger.focus = focus;
+    this.saveLedger(ledger);
+    return focus;
+  }
+
+  clearFocus(conversationId: string): void {
+    const ledger = this.loadLedger(conversationId);
+    delete ledger.focus;
+    this.saveLedger(ledger);
+  }
+
   recordObservation(
     conversationId: string,
     content: string,
     relevance: Relevance = "medium",
-    sourceStepIndices: number[] = []
-  ): Observation {
+    sourceStepIndices: number[] = [],
+    resolvesIds: string[] = []
+  ): RecordObservationResult {
     const ledger = this.loadLedger(conversationId);
     const now = new Date();
     const pad = (n: number) => n.toString().padStart(2, "0");
@@ -313,22 +367,107 @@ export class StorageManager {
       conversationId,
     };
 
+    const droppedIds: string[] = [];
+    if (resolvesIds.length > 0) {
+      const resolvesSet = new Set(resolvesIds);
+      ledger.activeObservations = ledger.activeObservations.filter((o) => {
+        if (resolvesSet.has(o.id)) {
+          droppedIds.push(o.id);
+          return false;
+        }
+        return true;
+      });
+      ledger.droppedObservationIds.push(...droppedIds);
+    }
+
     ledger.activeObservations.push(obs);
     ledger.allObservations.push(obs);
     this.saveLedger(ledger);
 
-    return obs;
+    return Object.assign(obs, { droppedIds });
   }
 
   pinReflection(
     conversationId: string,
     content: string,
-    supportingObservationIds: string[] = []
-  ): Reflection {
+    supportingObservationIdsOrOptions?: string[] | {
+      replaceId?: string;
+      supportingObservationIds?: string[];
+      autoDeduplicate?: boolean;
+    }
+  ): PinReflectionResult {
     const ledger = this.loadLedger(conversationId);
-    const id = hashId(`pin-${content}-${Date.now()}`);
     const tokenCount = estimateStringTokens(content) + 5;
 
+    let replaceId: string | undefined;
+    let supportingObservationIds: string[] = [];
+    let autoDeduplicate: boolean = true;
+
+    if (Array.isArray(supportingObservationIdsOrOptions)) {
+      supportingObservationIds = supportingObservationIdsOrOptions;
+    } else if (supportingObservationIdsOrOptions && typeof supportingObservationIdsOrOptions === "object") {
+      replaceId = supportingObservationIdsOrOptions.replaceId;
+      supportingObservationIds = supportingObservationIdsOrOptions.supportingObservationIds || [];
+      autoDeduplicate = supportingObservationIdsOrOptions.autoDeduplicate !== false;
+    }
+
+    // 1. Explicit replacement via replaceId
+    if (replaceId) {
+      const existingIdx = ledger.reflections.findIndex((r) => r.id === replaceId);
+      if (existingIdx !== -1) {
+        const oldRef = ledger.reflections[existingIdx];
+        const mergedSupp = Array.from(new Set([...(oldRef.supportingObservationIds || []), ...supportingObservationIds]));
+        const updatedRef: Reflection = {
+          id: replaceId,
+          content,
+          supportingObservationIds: mergedSupp,
+          tokenCount,
+        };
+        ledger.reflections[existingIdx] = updatedRef;
+        this.saveLedger(ledger);
+        return Object.assign(updatedRef, {
+          action: "replaced" as const,
+          replacedId: replaceId,
+        });
+      }
+    }
+
+    // 2. Automatic Deduplication / Merging using CJK N-Gram + Word Similarity
+    if (autoDeduplicate && ledger.reflections.length > 0) {
+      let maxScore = 0;
+      let bestMatch: Reflection | null = null;
+      let bestMatchIdx = -1;
+
+      for (let i = 0; i < ledger.reflections.length; i++) {
+        const existing = ledger.reflections[i];
+        const score = calculateSimilarity(content, existing.content);
+        if (score > maxScore) {
+          maxScore = score;
+          bestMatch = existing;
+          bestMatchIdx = i;
+        }
+      }
+
+      if (bestMatch && maxScore >= DEDUPLICATION_SIMILARITY_THRESHOLD) {
+        const mergedSupp = Array.from(new Set([...(bestMatch.supportingObservationIds || []), ...supportingObservationIds]));
+        const updatedRef: Reflection = {
+          id: bestMatch.id,
+          content,
+          supportingObservationIds: mergedSupp,
+          tokenCount,
+        };
+        ledger.reflections[bestMatchIdx] = updatedRef;
+        this.saveLedger(ledger);
+        return Object.assign(updatedRef, {
+          action: "merged" as const,
+          replacedId: bestMatch.id,
+          similarityScore: maxScore,
+        });
+      }
+    }
+
+    // 3. New reflection creation
+    const id = hashId(`pin-${content}-${Date.now()}`);
     const ref: Reflection = {
       id,
       content,
@@ -339,7 +478,67 @@ export class StorageManager {
     ledger.reflections.push(ref);
     this.saveLedger(ledger);
 
-    return ref;
+    return Object.assign(ref, { action: "created" as const });
+  }
+
+  unpinReflections(conversationId: string, ids: string[]): { unpinned: string[]; remaining: number } {
+    const ledger = this.loadLedger(conversationId);
+    const idSet = new Set(ids);
+    const unpinned: string[] = [];
+
+    ledger.reflections = ledger.reflections.filter((r) => {
+      if (idSet.has(r.id)) {
+        unpinned.push(r.id);
+        return false;
+      }
+      return true;
+    });
+
+    this.saveLedger(ledger);
+
+    // Also remove from project baseline file if present
+    if (this.projectBaselinePath && fs.existsSync(this.projectBaselinePath)) {
+      try {
+        const raw = fs.readFileSync(this.projectBaselinePath, "utf-8");
+        const baseline: ProjectBaseline = JSON.parse(raw);
+        if (Array.isArray(baseline.reflections)) {
+          baseline.reflections = baseline.reflections.filter((r) => !idSet.has(r.id));
+          baseline.updatedAt = new Date().toISOString();
+          atomicWriteFileSync(this.projectBaselinePath, JSON.stringify(baseline, null, 2));
+        }
+      } catch {}
+    }
+
+    return {
+      unpinned,
+      remaining: ledger.reflections.length,
+    };
+  }
+
+  checkpoint(
+    conversationId: string,
+    milestone: string,
+    nextAction: string,
+    options: {
+      relevance?: Relevance;
+      resolvesIds?: string[];
+      sourceStepIndices?: number[];
+    } = {}
+  ): { observation: Observation; focus: FocusState; droppedIds: string[] } {
+    const { relevance = "high", resolvesIds = [], sourceStepIndices = [] } = options;
+    const obs = this.recordObservation(
+      conversationId,
+      milestone,
+      relevance,
+      sourceStepIndices,
+      resolvesIds
+    );
+    const focus = this.setFocus(conversationId, milestone, nextAction);
+    return {
+      observation: obs,
+      focus,
+      droppedIds: obs.droppedIds || [],
+    };
   }
 
   dropObservations(
@@ -379,7 +578,7 @@ export class StorageManager {
       return fs.readFileSync(this.projectionPath, "utf-8").trim();
     }
     const ledger = this.loadLedger(conversationId);
-    if (ledger.reflections.length > 0 || ledger.activeObservations.length > 0) {
+    if (ledger.reflections.length > 0 || ledger.activeObservations.length > 0 || (ledger.focus && (ledger.focus.goal || ledger.focus.nextAction))) {
       if (fs.existsSync(this.projectionPath)) {
         return fs.readFileSync(this.projectionPath, "utf-8").trim();
       }

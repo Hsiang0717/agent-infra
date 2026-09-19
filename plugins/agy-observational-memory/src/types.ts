@@ -18,12 +18,19 @@ export interface Reflection {
   tokenCount: number;
 }
 
+export interface FocusState {
+  goal: string;
+  nextAction: string;
+  updatedAt: string;
+}
+
 export interface SessionLedger {
   version: number;
   conversationId: string;
   workspacePath?: string;
   createdAt: string;
   updatedAt: string;
+  focus?: FocusState;
   activeObservations: Observation[];
   allObservations: Observation[]; // historical ledger
   reflections: Reflection[];

@@ -402,4 +402,240 @@ test("Sliding window cap trims low/medium observations when exceeding limit", ()
   }
 });
 
+import { calculateSimilarity, hybridTokenize, DEDUPLICATION_SIMILARITY_THRESHOLD } from "../src/similarity.js";
+
+test("hybridTokenize and calculateSimilarity accurately detect CJK and English similarity", () => {
+  const text1 = "目前所有討論嚴格限定在 exp/ 目錄，優先評估魯棒性與泛用性。";
+  const text2 = "目前所有討論嚴格限定在 exp/ 目錄，優先以魯棒性與泛用性為最高標準。";
+  const text3 = "專案全面改用 PostgreSQL 與 Drizzle ORM 管理資料庫。";
+
+  const tokens1 = hybridTokenize(text1);
+  const tokens2 = hybridTokenize(text2);
+  assert.ok(tokens1.has("exp"));
+  assert.ok(tokens1.has("目錄"));
+  assert.ok(tokens1.has("魯棒"));
+
+  const sim12 = calculateSimilarity(text1, text2);
+  assert.ok(sim12 >= DEDUPLICATION_SIMILARITY_THRESHOLD, `Similarity ${sim12} should be >= ${DEDUPLICATION_SIMILARITY_THRESHOLD}`);
+
+  const sim13 = calculateSimilarity(text1, text3);
+  assert.ok(sim13 < 0.3, `Similarity ${sim13} should be low`);
+});
+
+test("StorageManager.setFocus, clearFocus, and renderSummary project Current Focus at top", () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "om-focus-test-"));
+  const sessionDir = path.join(tempDir, "session");
+  fs.mkdirSync(sessionDir, { recursive: true });
+
+  try {
+    const storage = new StorageManager(sessionDir, false);
+    
+    // Set focus
+    const focus = storage.setFocus("test-focus", "Implement AST Validation", "Run unit tests");
+    assert.strictEqual(focus.goal, "Implement AST Validation");
+    assert.strictEqual(focus.nextAction, "Run unit tests");
+
+    // Projection should include Current Focus at top
+    let projection = storage.readProjection();
+    assert.ok(projection.includes("## Current Focus & Next Steps"));
+    assert.ok(projection.includes("- Goal: Implement AST Validation"));
+    assert.ok(projection.includes("- Next Action: Run unit tests"));
+
+    // Clear focus
+    storage.clearFocus("test-focus");
+    projection = storage.readProjection();
+    assert.ok(!projection.includes("## Current Focus & Next Steps"));
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("StorageManager.checkpoint atomically settles milestone, updates focus, and resolves prior IDs", () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "om-checkpoint-test-"));
+  const sessionDir = path.join(tempDir, "session");
+  fs.mkdirSync(sessionDir, { recursive: true });
+
+  try {
+    const storage = new StorageManager(sessionDir, false);
+    
+    // Step 1: Record initial preliminary draft observation
+    const draftObs = storage.recordObservation("test-cp", "Drafted initial AST schema", "medium");
+    assert.strictEqual(storage.loadLedger("test-cp").activeObservations.length, 1);
+
+    // Step 2: Checkpoint settles milestone and resolves draftObs
+    const cpResult = storage.checkpoint(
+      "test-cp",
+      "AST Validation schema finalized and verified with tests",
+      "Implement AST Transformer",
+      {
+        relevance: "high",
+        resolvesIds: [draftObs.id],
+      }
+    );
+
+    assert.strictEqual(cpResult.observation.content, "AST Validation schema finalized and verified with tests");
+    assert.strictEqual(cpResult.focus.goal, "AST Validation schema finalized and verified with tests");
+    assert.strictEqual(cpResult.focus.nextAction, "Implement AST Transformer");
+    assert.strictEqual(cpResult.droppedIds.length, 1);
+    assert.strictEqual(cpResult.droppedIds[0], draftObs.id);
+
+    // Verify projection has milestone, focus, and does NOT have draftObs
+    const projection = storage.readProjection();
+    assert.ok(projection.includes("## Current Focus & Next Steps"));
+    assert.ok(projection.includes("- Next Action: Implement AST Transformer"));
+    assert.ok(projection.includes(cpResult.observation.id));
+    assert.ok(!projection.includes(draftObs.id));
+
+    // Verify active observations in ledger
+    const ledger = storage.loadLedger("test-cp");
+    assert.strictEqual(ledger.activeObservations.length, 1);
+    assert.strictEqual(ledger.activeObservations[0].id, cpResult.observation.id);
+    assert.ok(ledger.droppedObservationIds.includes(draftObs.id));
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("StorageManager.pinReflection auto-deduplicates similar reflections and supports --replace", () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "om-pin-dedup-"));
+  const sessionDir = path.join(tempDir, "session");
+  fs.mkdirSync(sessionDir, { recursive: true });
+
+  try {
+    const storage = new StorageManager(sessionDir, false);
+
+    // Pin 1st reflection
+    const ref1 = storage.pinReflection(
+      "test-dedup",
+      "目前所有討論嚴格限定在 exp/ 目錄，優先評估魯棒性與泛用性。"
+    );
+    assert.strictEqual(ref1.action, "created");
+    assert.strictEqual(storage.loadLedger("test-dedup").reflections.length, 1);
+
+    // Pin 2nd similar reflection (should auto-merge/replace instead of creating duplicate)
+    const ref2 = storage.pinReflection(
+      "test-dedup",
+      "目前所有討論嚴格限定在 exp/ 目錄，優先以魯棒性與泛用性為最高標準。"
+    );
+    assert.strictEqual(ref2.action, "merged");
+    assert.strictEqual(ref2.id, ref1.id); // Same ID preserved
+    assert.strictEqual(ref2.content, "目前所有討論嚴格限定在 exp/ 目錄，優先以魯棒性與泛用性為最高標準。");
+
+    const ledger = storage.loadLedger("test-dedup");
+    assert.strictEqual(ledger.reflections.length, 1, "Should only have 1 reflection after auto-dedup");
+
+    // Explicit replace by ID
+    const ref3 = storage.pinReflection("test-dedup", "專案限定使用 Vitest 與 TypeScript", {
+      replaceId: ref1.id,
+    });
+    assert.strictEqual(ref3.action, "replaced");
+    assert.strictEqual(ref3.id, ref1.id);
+    assert.strictEqual(storage.loadLedger("test-dedup").reflections.length, 1);
+    assert.strictEqual(storage.loadLedger("test-dedup").reflections[0].content, "專案限定使用 Vitest 與 TypeScript");
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("StorageManager.unpinReflections removes reflections from session and baseline", () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "om-unpin-test-"));
+  const projectDir = path.join(tempDir, "workspace");
+  const sessionDir = path.join(projectDir, ".gemini", "memory", "unpin-conv");
+  fs.mkdirSync(sessionDir, { recursive: true });
+
+  try {
+    const storage = new StorageManager(sessionDir, true, projectDir);
+
+    const ref = storage.pinReflection("unpin-conv", "Temporary architectural constraint to remove");
+    assert.strictEqual(storage.loadLedger("unpin-conv").reflections.length, 1);
+
+    const unpinRes = storage.unpinReflections("unpin-conv", [ref.id]);
+    assert.strictEqual(unpinRes.unpinned.length, 1);
+    assert.strictEqual(unpinRes.unpinned[0], ref.id);
+    assert.strictEqual(unpinRes.remaining, 0);
+
+    const updatedLedger = storage.loadLedger("unpin-conv");
+    assert.strictEqual(updatedLedger.reflections.length, 0);
+
+    // Baseline reflections file must also have 0 reflections
+    const baselineFile = storage.projectBaselinePath!;
+    assert.ok(fs.existsSync(baselineFile));
+    const baselineData = JSON.parse(fs.readFileSync(baselineFile, "utf-8"));
+    assert.strictEqual(baselineData.reflections.length, 0);
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
+import { execFileSync } from "node:child_process";
+
+test("CLI execution of om focus, checkpoint, record --resolves, pin --replace, and unpin", () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "om-cli-2.0-"));
+  const projectDir = path.join(tempDir, "workspace");
+  fs.mkdirSync(path.join(projectDir, ".git"), { recursive: true });
+  const omBin = path.resolve(__dirname, "..", "bin", "om.cjs");
+
+  try {
+    const env = { ...process.env, AGY_CONVERSATION_ID: "cli-conv-2" };
+
+    // 1. om focus
+    const focusOut = execFileSync("node", [omBin, "focus", "Build parser engine", "--next", "Run AST tests"], {
+      cwd: projectDir,
+      env,
+      encoding: "utf-8",
+    });
+    assert.ok(focusOut.includes("[OK] Updated Current Focus"));
+    assert.ok(focusOut.includes("Build parser engine"));
+
+    // 2. om record preliminary observation
+    const recOut = execFileSync("node", [omBin, "record", "Parser draft 1 completed"], {
+      cwd: projectDir,
+      env,
+      encoding: "utf-8",
+    });
+    const draftIdMatch = recOut.match(/\[([0-9a-f]{12})\]/);
+    assert.ok(draftIdMatch);
+    const draftId = draftIdMatch[1];
+
+    // 3. om checkpoint with --resolves
+    const cpOut = execFileSync("node", [omBin, "checkpoint", "Parser v2 verified", "--next", "Implement optimizer", "--resolves", draftId], {
+      cwd: projectDir,
+      env,
+      encoding: "utf-8",
+    });
+    assert.ok(cpOut.includes("[OK] Checkpoint settled"));
+    assert.ok(cpOut.includes("Auto-resolved & dropped 1 superseded observation"));
+
+    // 4. om pin with auto-dedup
+    const pin1Out = execFileSync("node", [omBin, "pin", "Repo requires strict typescript and esbuild"], {
+      cwd: projectDir,
+      env,
+      encoding: "utf-8",
+    });
+    assert.ok(pin1Out.includes("[OK] Pinned new reflection"));
+    const pin1IdMatch = pin1Out.match(/\[([0-9a-f]{12})\]/);
+    assert.ok(pin1IdMatch);
+    const pin1Id = pin1IdMatch[1];
+
+    const pin2Out = execFileSync("node", [omBin, "pin", "Repo requires strict typescript and esbuild bundler"], {
+      cwd: projectDir,
+      env,
+      encoding: "utf-8",
+    });
+    assert.ok(pin2Out.includes("Deduplicated & updated existing reflection"));
+
+    // 5. om unpin
+    const unpinOut = execFileSync("node", [omBin, "unpin", pin1Id], {
+      cwd: projectDir,
+      env,
+      encoding: "utf-8",
+    });
+    assert.ok(unpinOut.includes("[OK] Unpinned 1 reflection"));
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
+
+
 
