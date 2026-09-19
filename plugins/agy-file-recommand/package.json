@@ -1,0 +1,28 @@
+{
+  "name": "agy-file-recommand",
+  "version": "1.0.0",
+  "description": "Behavioral episode tracker and context file recommender for Antigravity",
+  "type": "commonjs",
+  "bin": {
+    "file-recommand": "./bin/recommand.cjs"
+  },
+  "scripts": {
+    "build": "node build.mjs",
+    "test": "node build.mjs && npx esbuild tests/recommand.test.ts --bundle --platform=node --outfile=dist/recommand.test.cjs && node --test dist/recommand.test.cjs"
+  },
+  "keywords": [
+    "antigravity",
+    "plugin",
+    "skill",
+    "file-recommand",
+    "context-recommendation"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {},
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "esbuild": "^0.25.0",
+    "typescript": "^5.7.0"
+  }
+}

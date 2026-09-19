@@ -1,0 +1,4 @@
+{
+  "name": "agy-file-recommand",
+  "description": "Behavioral episode tracker and context file recommender for Antigravity: captures query, read, edit, citation, and git diff causality loop."
+}

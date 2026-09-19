@@ -1,0 +1,18 @@
+{
+  "agy-file-recommand-hooks": {
+    "PreInvocation": [
+      {
+        "type": "command",
+        "command": "node ./bin/recommand.cjs hook pre-invocation",
+        "timeout": 5
+      }
+    ],
+    "PostInvocation": [
+      {
+        "type": "command",
+        "command": "node ./bin/recommand.cjs hook post-invocation",
+        "timeout": 10
+      }
+    ]
+  }
+}
