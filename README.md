@@ -20,7 +20,7 @@ license: MIT
   * [pi-agent-delegate](skills/pi-agent-delegate/): 將任務委派給本機 `pi` CLI Agent。
   * [skill-creator](skills/skill-creator/): Skill 建立、評測與效能最佳化工具。
 * **[plugins/](plugins/)**: 外掛整合套件（Antigravity Plugins）。
-  * [agy-observational-memory](plugins/agy-observational-memory/): 極簡 Skill-First 雙層記憶架構（Observations + Reflections），提供確定性 12 碼追溯、零延遲紀錄與對話內反思。
+  * [agy-context-flow](plugins/agy-context-flow/): 自主情境流動與檔案推薦引擎（Context Flow Engine），支援 5 維因果行為追蹤、雙先驗貝氏融合（Bayesian Prior Fusion）、PPMI-SVD 向量語義檢索與跨 Session 動態 Handover。
   * [git-agent-flow](plugins/git-agent-flow/): Git Agent Flow，包含影子 WIP 快照、極速回滾與 `/smart-commit` 語義化原子 Conventional Commit 管理。
 * **[extensions/](extensions/)**: 編輯器擴充套件。
   * [agy-vscode](extensions/agy-vscode/): VS Code 擴充套件，提供一鍵啟動 AGY CLI 的快捷圖示與環境隔離。
