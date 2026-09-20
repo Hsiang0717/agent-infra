@@ -25,6 +25,7 @@ var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__ge
 
 // src/cli.ts
 var fs5 = __toESM(require("node:fs"));
+var path5 = __toESM(require("node:path"));
 var import_node_crypto = require("node:crypto");
 
 // src/parser.ts
@@ -264,6 +265,32 @@ function getGitTrackedFiles(workspaceRoot, limit = 500) {
     return [];
   }
 }
+function getGitRecentFiles(workspaceRoot, commitCount = 15) {
+  const result = /* @__PURE__ */ new Map();
+  if (!workspaceRoot) return result;
+  try {
+    const output = (0, import_node_child_process.execSync)(`git log --name-only -n ${commitCount} --pretty=format:`, {
+      cwd: workspaceRoot,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+      timeout: 1500
+    });
+    const lines = output.split("\n").map((l) => l.trim()).filter(Boolean);
+    const counts = /* @__PURE__ */ new Map();
+    for (const line of lines) {
+      const normalized = line.replace(/\\/g, "/");
+      counts.set(normalized, (counts.get(normalized) || 0) + 1);
+    }
+    const maxCount = Math.max(1, ...Array.from(counts.values()));
+    for (const [file, cnt] of counts.entries()) {
+      const score = Math.min(0.4, Number((0.15 + 0.25 * (cnt / maxCount)).toFixed(2)));
+      result.set(file, score);
+    }
+    return result;
+  } catch {
+    return result;
+  }
+}
 
 // src/store.ts
 var fs3 = __toESM(require("node:fs"));
@@ -273,6 +300,15 @@ var path3 = __toESM(require("node:path"));
 var fs2 = __toESM(require("node:fs"));
 var path2 = __toESM(require("node:path"));
 var os = __toESM(require("node:os"));
+var DEFAULT_CONFIDENCE_TIERS = {
+  high: 0.75,
+  medium: 0.5,
+  low: 0.35
+};
+var DEFAULT_CONTINUITY_CONFIG = {
+  enabled: true,
+  maxSessions: 5
+};
 var DEFAULT_CONFIG = {
   record: {
     enabled: true
@@ -280,9 +316,25 @@ var DEFAULT_CONFIG = {
   recommend: {
     enabled: true,
     threshold: 0.35,
-    maxItems: 3
-  }
+    maxItems: 3,
+    confidenceFormat: "categorical",
+    confidenceTiers: { ...DEFAULT_CONFIDENCE_TIERS }
+  },
+  continuity: { ...DEFAULT_CONTINUITY_CONFIG }
 };
+function formatConfidence(score, format = "categorical", customTiers) {
+  if (format === "hidden") return null;
+  if (format === "numeric") return score.toFixed(2);
+  const tiers = {
+    high: customTiers?.high ?? DEFAULT_CONFIDENCE_TIERS.high,
+    medium: customTiers?.medium ?? DEFAULT_CONFIDENCE_TIERS.medium,
+    low: customTiers?.low ?? DEFAULT_CONFIDENCE_TIERS.low
+  };
+  if (score >= tiers.high) return "HIGH";
+  if (score >= tiers.medium) return "MEDIUM";
+  if (score >= tiers.low) return "LOW";
+  return "LOW";
+}
 function findWorkspaceRoot(startDir = process.cwd()) {
   let current = path2.resolve(startDir);
   const home = path2.resolve(os.homedir());
@@ -304,7 +356,7 @@ function findWorkspaceRoot(startDir = process.cwd()) {
 function getConfigPath(workspaceRoot) {
   const ws = workspaceRoot ? path2.resolve(workspaceRoot) : findWorkspaceRoot();
   if (!ws || !fs2.existsSync(ws)) return null;
-  return path2.join(ws, ".agents", "file-recommand", "config.json");
+  return path2.join(ws, ".agents", "context-flow", "config.json");
 }
 function isPluginEnabled(workspaceRoot) {
   const configPath = getConfigPath(workspaceRoot);
@@ -319,7 +371,18 @@ function loadConfig(workspaceRoot) {
     const raw = JSON.parse(fs2.readFileSync(configPath, "utf8"));
     return {
       record: { ...DEFAULT_CONFIG.record, ...raw.record || {} },
-      recommend: { ...DEFAULT_CONFIG.recommend, ...raw.recommend || {} }
+      recommend: {
+        ...DEFAULT_CONFIG.recommend,
+        ...raw.recommend || {},
+        confidenceTiers: {
+          ...DEFAULT_CONFIG.recommend.confidenceTiers,
+          ...raw.recommend?.confidenceTiers || {}
+        }
+      },
+      continuity: {
+        ...DEFAULT_CONFIG.continuity,
+        ...raw.continuity || {}
+      }
     };
   } catch {
     return { ...DEFAULT_CONFIG };
@@ -328,7 +391,7 @@ function loadConfig(workspaceRoot) {
 function saveConfig(config, workspaceRoot) {
   const ws = workspaceRoot ? path2.resolve(workspaceRoot) : findWorkspaceRoot();
   if (!ws || !fs2.existsSync(ws)) return false;
-  const localDir = path2.join(ws, ".agents", "file-recommand");
+  const localDir = path2.join(ws, ".agents", "context-flow");
   if (!fs2.existsSync(localDir)) {
     fs2.mkdirSync(localDir, { recursive: true });
   }
@@ -336,12 +399,75 @@ function saveConfig(config, workspaceRoot) {
   fs2.writeFileSync(targetFile, JSON.stringify(config, null, 2), "utf8");
   return true;
 }
+function initWorkspace(workspaceRoot, customScriptRelPath) {
+  const ws = workspaceRoot ? path2.resolve(workspaceRoot) : findWorkspaceRoot() || process.cwd();
+  const configAlreadyExists = isPluginEnabled(ws);
+  if (!configAlreadyExists) {
+    saveConfig(DEFAULT_CONFIG, ws);
+  } else {
+    const existing = loadConfig(ws);
+    if (existing) {
+      saveConfig(existing, ws);
+    }
+  }
+  const configPath = getConfigPath(ws) || path2.join(ws, ".agents", "context-flow", "config.json");
+  const agentsDir = path2.join(ws, ".agents");
+  if (!fs2.existsSync(agentsDir)) {
+    fs2.mkdirSync(agentsDir, { recursive: true });
+  }
+  const hooksPath = path2.join(agentsDir, "hooks.json");
+  let existingHooks = {};
+  if (fs2.existsSync(hooksPath)) {
+    try {
+      const content = fs2.readFileSync(hooksPath, "utf8").trim();
+      if (content) {
+        existingHooks = JSON.parse(content);
+      }
+    } catch {
+      existingHooks = {};
+    }
+  }
+  if (existingHooks["agy-file-recommand-hooks"]) {
+    delete existingHooks["agy-file-recommand-hooks"];
+  }
+  const scriptPath = customScriptRelPath || "plugins/agy-context-flow/bin/context-flow.cjs";
+  existingHooks["agy-context-flow-hooks"] = {
+    PreInvocation: [
+      {
+        type: "command",
+        command: `node ${scriptPath} hook pre-invocation`,
+        timeout: 5
+      }
+    ],
+    PostInvocation: [
+      {
+        type: "command",
+        command: `node ${scriptPath} hook post-invocation`,
+        timeout: 10
+      }
+    ],
+    Stop: [
+      {
+        type: "command",
+        command: `node ${scriptPath} hook stop`,
+        timeout: 10
+      }
+    ]
+  };
+  fs2.writeFileSync(hooksPath, JSON.stringify(existingHooks, null, 2), "utf8");
+  return {
+    configCreated: !configAlreadyExists,
+    hooksUpdated: true,
+    hooksPath,
+    configPath
+  };
+}
 
 // src/store.ts
 function getStoreDir(workspaceRoot) {
   const ws = workspaceRoot ? path3.resolve(workspaceRoot) : findWorkspaceRoot();
   if (!ws || !fs3.existsSync(ws)) return null;
-  const dir = path3.join(ws, ".agents", "file-recommand");
+  const dir = path3.join(ws, ".agents", "context-flow");
   if (!fs3.existsSync(dir)) {
     try {
       fs3.mkdirSync(dir, { recursive: true });
@@ -355,6 +481,65 @@ function getStorePath(workspaceRoot) {
   const dir = getStoreDir(workspaceRoot);
   if (!dir) return null;
   return path3.join(dir, "episodes.jsonl");
+}
+function getLastSessionPath(workspaceRoot) {
+  const dir = getStoreDir(workspaceRoot);
+  if (!dir) return null;
+  return path3.join(dir, "last_session.json");
+}
+function getCustomMessagePath(workspaceRoot) {
+  const dir = getStoreDir(workspaceRoot);
+  if (!dir) return null;
+  return path3.join(dir, "custom_message.txt");
+}
+function loadCustomMessage(workspaceRoot) {
+  const p = getCustomMessagePath(workspaceRoot);
+  if (!p || !fs3.existsSync(p)) return null;
+  try {
+    const content = fs3.readFileSync(p, "utf8").trim();
+    return content.length > 0 ? content : null;
+  } catch {
+    return null;
+  }
+}
+function saveCustomMessage(workspaceRoot, message) {
+  const p = getCustomMessagePath(workspaceRoot);
+  if (!p) return;
+  try {
+    if (message.trim().length === 0) {
+      if (fs3.existsSync(p)) fs3.unlinkSync(p);
+    } else {
+      fs3.writeFileSync(p, message.trim(), "utf8");
+    }
+  } catch {
+  }
+}
+function loadRecentSessions(workspaceRoot) {
+  const lastSessionPath = getLastSessionPath(workspaceRoot);
+  if (!lastSessionPath || !fs3.existsSync(lastSessionPath)) return [];
+  try {
+    const raw = JSON.parse(fs3.readFileSync(lastSessionPath, "utf8"));
+    if (Array.isArray(raw)) {
+      return raw.filter((item) => Boolean(item && item.conversationId));
+    }
+    if (raw && typeof raw === "object" && raw.conversationId) {
+      return [raw];
+    }
+    return [];
+  } catch {
+    return [];
+  }
+}
+function saveSessionSnapshot(workspaceRoot, snapshot, maxSessions = 5) {
+  const lastSessionPath = getLastSessionPath(workspaceRoot);
+  if (!lastSessionPath) return;
+  const currentList = loadRecentSessions(workspaceRoot);
+  const filtered = currentList.filter((s) => s.conversationId !== snapshot.conversationId);
+  const updated = [snapshot, ...filtered].slice(0, Math.max(1, maxSessions));
+  try {
+    fs3.writeFileSync(lastSessionPath, JSON.stringify(updated, null, 2), "utf8");
+  } catch {
+  }
 }
 function saveEpisode(workspaceRoot, episode) {
   const storePath = getStorePath(workspaceRoot);
@@ -572,6 +757,18 @@ function truncatedSVD(matrix, k, iterations = 25) {
   }
   return { U, S, V };
 }
+function extractSubwords(word, minN = 3, maxN = 4) {
+  if (word.length < minN || !/^[a-zA-Z0-9_]+$/.test(word)) return [];
+  const subwords = [];
+  const wrapped = `<${word.toLowerCase()}>`;
+  const len = wrapped.length;
+  for (let n = minN; n <= Math.min(maxN, len); n++) {
+    for (let i = 0; i <= len - n; i++) {
+      subwords.push(wrapped.slice(i, i + n));
+    }
+  }
+  return subwords;
+}
 var SemanticVectorEngine = class {
   vocab = /* @__PURE__ */ new Map();
   // word -> index
@@ -593,17 +790,26 @@ var SemanticVectorEngine = class {
     const contextCounts = /* @__PURE__ */ new Map();
     const cooccur = /* @__PURE__ */ new Map();
     let totalCooccur = 0;
+    const recordToken = (token, uniqueFiles) => {
+      wordCounts.set(token, (wordCounts.get(token) || 0) + 1);
+      for (const file of uniqueFiles) {
+        contextCounts.set(file, (contextCounts.get(file) || 0) + 1);
+        if (!cooccur.has(token)) cooccur.set(token, /* @__PURE__ */ new Map());
+        const map = cooccur.get(token);
+        map.set(file, (map.get(file) || 0) + 1);
+        totalCooccur++;
+      }
+    };
     for (const doc of docs) {
       const uniqueTokens = Array.from(new Set(doc.tokens));
       const uniqueFiles = Array.from(new Set(doc.files));
       for (const token of uniqueTokens) {
-        wordCounts.set(token, (wordCounts.get(token) || 0) + 1);
-        for (const file of uniqueFiles) {
-          contextCounts.set(file, (contextCounts.get(file) || 0) + 1);
-          if (!cooccur.has(token)) cooccur.set(token, /* @__PURE__ */ new Map());
-          const map = cooccur.get(token);
-          map.set(file, (map.get(file) || 0) + 1);
-          totalCooccur++;
+        recordToken(token, uniqueFiles);
+        if (token.length >= 4) {
+          const subwords = extractSubwords(token);
+          for (const sw of subwords) {
+            recordToken(sw, uniqueFiles);
+          }
         }
       }
     }
@@ -661,7 +867,22 @@ var SemanticVectorEngine = class {
     const pooled = new Array(k).fill(0);
     let count = 0;
     for (const token of tokens) {
-      const vec = this.wordEmbeddings.get(token);
+      let vec = this.wordEmbeddings.get(token);
+      if (!vec && token.length >= 4) {
+        const subwords = extractSubwords(token);
+        const subVec = new Array(k).fill(0);
+        let subCount = 0;
+        for (const sw of subwords) {
+          const swEmbedding = this.wordEmbeddings.get(sw);
+          if (swEmbedding) {
+            for (let i = 0; i < k; i++) subVec[i] += swEmbedding[i];
+            subCount++;
+          }
+        }
+        if (subCount > 0) {
+          vec = subVec.map((x) => x / subCount);
+        }
+      }
       if (vec) {
         for (let i = 0; i < vec.length; i++) {
           pooled[i] += vec[i];
@@ -742,22 +963,35 @@ function recommendFiles(query, workspaceRoot, customConfig, currentConversationI
   if (queryTokens.length === 0) {
     return { items: [], mode: "NONE" };
   }
-  const candidateSignals = {};
-  const addSignal = (file, probability, reason) => {
+  const candidatePriors = {};
+  const candidateSemantics = {};
+  const addPrior = (file, probability, reason) => {
     if (!file || probability <= 0) return;
     const normalized = file.replace(/\\/g, "/").replace(/^\.\//, "").trim();
-    if (!candidateSignals[normalized]) {
-      candidateSignals[normalized] = { probs: [], reasons: [] };
+    if (!candidatePriors[normalized]) {
+      candidatePriors[normalized] = { probs: [], reasons: [] };
     }
-    const clampedProb = Math.max(0.01, Math.min(0.95, probability));
-    candidateSignals[normalized].probs.push(clampedProb);
-    if (!candidateSignals[normalized].reasons.includes(reason)) {
-      candidateSignals[normalized].reasons.push(reason);
+    const clamped = Math.max(0.01, Math.min(0.95, probability));
+    candidatePriors[normalized].probs.push(clamped);
+    if (!candidatePriors[normalized].reasons.includes(reason)) {
+      candidatePriors[normalized].reasons.push(reason);
+    }
+  };
+  const addSemantic = (file, probability, reason) => {
+    if (!file || probability <= 0) return;
+    const normalized = file.replace(/\\/g, "/").replace(/^\.\//, "").trim();
+    if (!candidateSemantics[normalized]) {
+      candidateSemantics[normalized] = { probs: [], reasons: [] };
+    }
+    const clamped = Math.max(0.01, Math.min(0.95, probability));
+    candidateSemantics[normalized].probs.push(clamped);
+    if (!candidateSemantics[normalized].reasons.includes(reason)) {
+      candidateSemantics[normalized].reasons.push(reason);
     }
   };
   for (const token of queryTokens) {
     if (token.includes("/") || token.includes(".")) {
-      addSignal(token, 0.8, "direct_path");
+      addSemantic(token, 0.85, "direct_path");
     }
   }
   const episodes = loadEpisodes(workspaceRoot, 100);
@@ -779,12 +1013,12 @@ function recommendFiles(query, workspaceRoot, customConfig, currentConversationI
           const isCurrentSession = Boolean(currentConversationId && ep.conversationId === currentConversationId);
           const sessionMultiplier = isCurrentSession ? 1.25 : 1;
           const decay = Math.min(1, stepDecay * sessionMultiplier);
-          const confidence = Math.min(0.6, Number((Math.max(score * 0.15, 0.35) * decay).toFixed(2)));
+          const confidence = Math.min(0.65, Number((Math.max(score * 0.15, 0.35) * decay).toFixed(2)));
           for (const f of ep.editedFiles) {
-            addSignal(f, confidence, isCurrentSession ? "active_session_edit" : "historical_edit");
+            addSemantic(f, confidence, isCurrentSession ? "active_session_edit" : "historical_edit");
           }
           for (const f of ep.citedFiles) {
-            addSignal(f, confidence * 0.7, isCurrentSession ? "active_session_cite" : "historical_cite");
+            addSemantic(f, confidence * 0.7, isCurrentSession ? "active_session_cite" : "historical_cite");
           }
         }
       }
@@ -798,7 +1032,7 @@ function recommendFiles(query, workspaceRoot, customConfig, currentConversationI
     const vectorResult = vectorEngine.score(queryTokens);
     for (const [file, sim] of vectorResult.fileScores.entries()) {
       if (sim > 0.3) {
-        addSignal(file, Math.min(0.55, Number(sim.toFixed(2))), "semantic_cosine");
+        addSemantic(file, Math.min(0.6, Number(sim.toFixed(2))), "semantic_cosine");
       }
     }
     for (const [epId, sim] of vectorResult.episodeScores.entries()) {
@@ -806,7 +1040,7 @@ function recommendFiles(query, workspaceRoot, customConfig, currentConversationI
         const ep = episodes.find((e) => e.id === epId);
         if (ep) {
           for (const f of ep.editedFiles) {
-            addSignal(f, Math.min(0.5, Number((sim * 0.8).toFixed(2))), "cross_lingual_semantic");
+            addSemantic(f, Math.min(0.55, Number((sim * 0.8).toFixed(2))), "cross_lingual_semantic");
           }
         }
       }
@@ -817,22 +1051,48 @@ function recommendFiles(query, workspaceRoot, customConfig, currentConversationI
     const fileTokens = tokenize(file);
     const overlap = fileTokens.filter((t) => queryTokens.includes(t) && t.length > 2 && !t.includes("/"));
     if (overlap.length >= 2) {
-      addSignal(file, Math.min(0.5, 0.25 * overlap.length), "tree_path_match");
+      addPrior(file, Math.min(0.5, 0.25 * overlap.length), "tree_path_match");
+    }
+    const baseName = path4.basename(file).toLowerCase();
+    if (/^(index|main|app|server|cli)\.(ts|js|rs|go|py)$/.test(baseName)) {
+      addPrior(file, 0.15, "entrypoint_prior");
     }
   }
   const gitFiles = getGitModifiedFiles(workspaceRoot);
   for (const f of gitFiles) {
-    addSignal(f, 0.3, "git_modified");
+    addPrior(f, 0.4, "git_modified");
   }
+  const recentFiles = getGitRecentFiles(workspaceRoot, 15);
+  for (const [f, score] of recentFiles.entries()) {
+    addPrior(f, score, "git_recent_active");
+  }
+  const mu = 4;
+  const lambda = totalEps / (totalEps + mu);
+  const wPrior = (0.6 * totalEps + mu) / (totalEps + mu);
+  const wSemantic = (totalEps + 0.5 * mu) / (totalEps + mu);
+  const allCandidateKeys = /* @__PURE__ */ new Set([...Object.keys(candidatePriors), ...Object.keys(candidateSemantics)]);
   const maxItems = config.recommend.maxItems ?? 3;
   const threshold = config.recommend.threshold ?? 0.35;
-  const items = Object.entries(candidateSignals).map(([filePath, data]) => {
-    const complementProduct = data.probs.reduce((acc, p) => acc * (1 - p), 1);
-    const noisyOrScore = 1 - complementProduct;
+  const items = Array.from(allCandidateKeys).map((filePath) => {
+    const priorData = candidatePriors[filePath];
+    const semanticData = candidateSemantics[filePath];
+    const pPrior = priorData ? 1 - priorData.probs.reduce((acc, p) => acc * (1 - p), 1) : 0;
+    const pSemantic = semanticData ? 1 - semanticData.probs.reduce((acc, p) => acc * (1 - p), 1) : 0;
+    let penalty = 1;
+    if (/\.(test|spec)\.[a-zA-Z0-9]+$/.test(filePath) || filePath.endsWith(".d.ts")) {
+      penalty = 0.6;
+    }
+    const effectivePrior = pPrior * penalty;
+    const uncertPrior = Math.pow(1 - effectivePrior, wPrior);
+    const uncertSemantic = Math.pow(1 - pSemantic, wSemantic);
+    const posteriorScore = 1 - uncertPrior * uncertSemantic;
+    const reasons = Array.from(
+      /* @__PURE__ */ new Set([...priorData?.reasons || [], ...semanticData?.reasons || []])
+    );
     return {
       path: filePath,
-      score: Number(Math.min(0.98, noisyOrScore).toFixed(2)),
-      reasons: data.reasons
+      score: Number(Math.min(0.98, posteriorScore).toFixed(2)),
+      reasons
     };
   }).filter((item) => {
     if (item.score < threshold) return false;
@@ -845,24 +1105,61 @@ function recommendFiles(query, workspaceRoot, customConfig, currentConversationI
   return items.length > 0 ? { items, mode: "SUGGESTION_HINT" } : { items: [], mode: "NONE" };
 }
 
+// src/continuity.ts
+function evaluateSessionContinuity(currentConversationId, workspaceRoot, config, overrideRecentSessions) {
+  if (!config || !config.continuity || !config.continuity.enabled) {
+    return { isContinuity: false };
+  }
+  let recentList;
+  if (overrideRecentSessions !== void 0) {
+    if (Array.isArray(overrideRecentSessions)) {
+      recentList = overrideRecentSessions;
+    } else if (overrideRecentSessions && overrideRecentSessions.conversationId) {
+      recentList = [overrideRecentSessions];
+    } else {
+      recentList = [];
+    }
+  } else {
+    recentList = loadRecentSessions(workspaceRoot);
+  }
+  if (recentList.length === 0) {
+    return { isContinuity: false };
+  }
+  const topSession = recentList[0];
+  if (!currentConversationId || topSession.conversationId === currentConversationId) {
+    return { isContinuity: false };
+  }
+  const handoverSessions = recentList.filter((s) => s.conversationId !== currentConversationId);
+  if (handoverSessions.length === 0) {
+    return { isContinuity: false };
+  }
+  return {
+    isContinuity: true,
+    recentSessions: handoverSessions,
+    previousId: handoverSessions[0].conversationId,
+    lastQuery: handoverSessions[0].lastQuery,
+    updatedAt: handoverSessions[0].updatedAt
+  };
+}
+
 // src/cli.ts
 async function readStdin(timeoutMs = 1500) {
   if (process.stdin.isTTY) return "";
-  return new Promise((resolve4) => {
+  return new Promise((resolve5) => {
     const chunks = [];
     const timer = setTimeout(() => {
-      resolve4(Buffer.concat(chunks).toString("utf8"));
+      resolve5(Buffer.concat(chunks).toString("utf8"));
     }, timeoutMs);
     process.stdin.on("data", (chunk) => {
       chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
     });
     process.stdin.on("end", () => {
       clearTimeout(timer);
-      resolve4(Buffer.concat(chunks).toString("utf8"));
+      resolve5(Buffer.concat(chunks).toString("utf8"));
     });
     process.stdin.on("error", () => {
       clearTimeout(timer);
-      resolve4("");
+      resolve5("");
     });
   });
 }
@@ -892,7 +1189,7 @@ async function handlePreInvocation() {
     }
     const workspaceRoot = getWorkspaceRoot(input);
     const config = loadConfig(workspaceRoot);
-    if (!config || !config.recommend.enabled) {
+    if (!config) {
       console.log(JSON.stringify({ injectSteps: [] }));
       return;
     }
@@ -906,19 +1203,53 @@ async function handlePreInvocation() {
       console.log(JSON.stringify({ injectSteps: [] }));
       return;
     }
-    const recommendation = recommendFiles(parsed.query, workspaceRoot, config, input.conversationId);
-    if (recommendation.mode === "SUGGESTION_HINT" && recommendation.items.length > 0) {
-      const xmlItems = recommendation.items.map(
-        (item) => `  <file path="${item.path}" confidence="${item.score.toFixed(2)}" reason="${item.reasons.join(",")}" />`
+    const injectMessages = [];
+    if (config.continuity?.enabled) {
+      const continuityResult = evaluateSessionContinuity(
+        input.conversationId,
+        workspaceRoot,
+        config
       );
-      const message = `<context_recommendations source="file-recommand">
+      if (continuityResult.isContinuity && continuityResult.recentSessions && continuityResult.recentSessions.length > 0) {
+        const sessionLines = continuityResult.recentSessions.map((s) => {
+          const queryAttr = s.lastQuery ? ` last_query="${s.lastQuery.replace(/"/g, "&quot;")}"` : "";
+          const updatedAttr = s.updatedAt ? ` updated_at="${s.updatedAt}"` : "";
+          return `  <session id="${s.conversationId}"${queryAttr}${updatedAttr} />`;
+        });
+        const continuityXml = `<recent_sessions>
+${sessionLines.join("\n")}
+</recent_sessions>`;
+        injectMessages.push(continuityXml);
+      }
+    }
+    const customMessage = loadCustomMessage(workspaceRoot);
+    if (customMessage) {
+      const customXml = `<custom_message>
+${customMessage}
+</custom_message>`;
+      injectMessages.push(customXml);
+    }
+    if (config.recommend.enabled) {
+      const recommendation = recommendFiles(parsed.query, workspaceRoot, config, input.conversationId);
+      if (recommendation.mode === "SUGGESTION_HINT" && recommendation.items.length > 0) {
+        const format = config.recommend.confidenceFormat ?? "categorical";
+        const xmlItems = recommendation.items.map((item) => {
+          const conf = formatConfidence(item.score, format, config.recommend.confidenceTiers);
+          const confAttr = conf !== null ? ` confidence="${conf}"` : "";
+          return `  <file path="${item.path}"${confAttr} reason="${item.reasons.join(",")}" />`;
+        });
+        const recMessage = `<context_recommendations source="context-flow">
 ${xmlItems.join("\n")}
 </context_recommendations>`;
+        injectMessages.push(recMessage);
+      }
+    }
+    if (injectMessages.length > 0) {
       console.log(
         JSON.stringify({
           injectSteps: [
             {
-              ephemeralMessage: message
+              ephemeralMessage: injectMessages.join("\n\n")
             }
           ]
         })
@@ -958,13 +1289,15 @@ async function handlePostInvocation() {
     }
     const parsed = parseLastTurn(transcriptPath, workspaceRoot || process.cwd());
     if (parsed && parsed.query) {
+      const nowIso = (/* @__PURE__ */ new Date()).toISOString();
+      const currentConvId = input.conversationId || "unknown";
+      const gitFiles = getGitModifiedFiles(workspaceRoot);
       const hasAction = parsed.readFiles.length > 0 || parsed.editedFiles.length > 0 || parsed.citedFiles.length > 0;
       if (hasAction) {
-        const gitFiles = getGitModifiedFiles(workspaceRoot);
         const episode = {
           id: (0, import_node_crypto.randomUUID)().replace(/-/g, "").slice(0, 12),
-          timestamp: (/* @__PURE__ */ new Date()).toISOString(),
-          conversationId: input.conversationId || "unknown",
+          timestamp: nowIso,
+          conversationId: currentConvId,
           query: parsed.query,
           thinkingTokens: parsed.thinkingTokens,
           readFiles: parsed.readFiles,
@@ -974,6 +1307,16 @@ async function handlePostInvocation() {
         };
         saveEpisode(workspaceRoot, episode);
       }
+      const maxSessions = config.continuity?.maxSessions ?? 5;
+      saveSessionSnapshot(
+        workspaceRoot,
+        {
+          conversationId: currentConvId,
+          updatedAt: nowIso,
+          lastQuery: parsed.query
+        },
+        maxSessions
+      );
     }
     console.log(JSON.stringify({}));
   } catch {
@@ -981,24 +1324,35 @@ async function handlePostInvocation() {
   }
 }
 function handleInit() {
-  const workspaceRoot = process.cwd();
-  if (isPluginEnabled(workspaceRoot)) {
-    console.log("\u2139\uFE0F  agy-file-recommand is already initialized in this project (.agents/file-recommand/config.json).");
-    return;
+  const workspaceRoot = findWorkspaceRoot() || process.cwd();
+  let binRelPath = "plugins/agy-context-flow/bin/context-flow.cjs";
+  if (process.argv[1]) {
+    const executedScript = path5.resolve(process.argv[1]);
+    const relToWs = path5.relative(workspaceRoot, executedScript).replace(/\\/g, "/");
+    if (!relToWs.startsWith("..") && !path5.isAbsolute(relToWs)) {
+      binRelPath = relToWs;
+    }
   }
-  saveConfig(DEFAULT_CONFIG, workspaceRoot);
-  console.log("\u2705 Initialized agy-file-recommand for this project!");
-  console.log("Created: .agents/file-recommand/config.json");
+  const result = initWorkspace(workspaceRoot, binRelPath);
+  if (result.configCreated) {
+    console.log("\u2705 Created configuration: .agents/context-flow/config.json");
+  } else {
+    console.log("\u2139\uFE0F  Configuration already present: .agents/context-flow/config.json");
+  }
+  if (result.hooksUpdated) {
+    console.log("\u2705 Registered lifecycle hooks in: .agents/hooks.json");
+  }
+  console.log("\u{1F680} agy-context-flow initialized and active!");
 }
 function handleStats() {
   const workspaceRoot = process.cwd();
   const config = loadConfig(workspaceRoot);
   if (!config) {
-    console.log("\u26A0\uFE0F  Plugin is not enabled in this project. Run `node bin/recommand.cjs init` to enable.");
+    console.log("\u26A0\uFE0F  Plugin is not enabled in this project. Run `node plugins/agy-context-flow/bin/context-flow.cjs init` to enable.");
     return;
   }
   const stats = getStats(workspaceRoot);
-  console.log("\n\u{1F4CA} === agy-file-recommand Statistics ===");
+  console.log("\n\u{1F4CA} === agy-context-flow Statistics ===");
   console.log(`Total Episodes Recorded: ${stats.totalEpisodes}`);
   console.log(`Avg Read Files / Turn  : ${stats.avgReadFilesPerTurn}`);
   console.log(`Avg Edited Files / Turn: ${stats.avgEditedFilesPerTurn}`);
@@ -1017,7 +1371,7 @@ function handleList(limit = 10) {
   const workspaceRoot = process.cwd();
   const config = loadConfig(workspaceRoot);
   if (!config) {
-    console.log("\u26A0\uFE0F  Plugin is not enabled in this project. Run `node bin/recommand.cjs init` to enable.");
+    console.log("\u26A0\uFE0F  Plugin is not enabled in this project. Run `node plugins/agy-context-flow/bin/context-flow.cjs init` to enable.");
     return;
   }
   const episodes = loadEpisodes(workspaceRoot, limit);
@@ -1042,7 +1396,7 @@ function handleRecommend(query) {
   const workspaceRoot = process.cwd();
   const config = loadConfig(workspaceRoot);
   if (!config) {
-    console.log("\u26A0\uFE0F  Plugin is not enabled in this project. Run `node bin/recommand.cjs init` to enable.");
+    console.log("\u26A0\uFE0F  Plugin is not enabled in this project. Run `node plugins/agy-context-flow/bin/context-flow.cjs init` to enable.");
     return;
   }
   console.log(`
@@ -1053,22 +1407,70 @@ function handleRecommend(query) {
   } else {
     console.log(`  Result (${result.items.length} suggestions):`);
     result.items.forEach((item, idx) => {
-      console.log(`  ${idx + 1}. ${item.path} (Score: ${(item.score * 100).toFixed(0)}%)`);
+      const conf = formatConfidence(
+        item.score,
+        config.recommend.confidenceFormat ?? "categorical",
+        config.recommend.confidenceTiers
+      );
+      const confLabel = conf !== null ? ` [${conf}]` : "";
+      console.log(`  ${idx + 1}. ${item.path}${confLabel} (Score: ${(item.score * 100).toFixed(0)}%)`);
       item.reasons.forEach((r) => console.log(`     - ${r}`));
     });
   }
   console.log("");
+}
+function handleSessions() {
+  const workspaceRoot = process.cwd();
+  const list = loadRecentSessions(workspaceRoot);
+  if (list.length === 0) {
+    console.log("\n\u2139\uFE0F  No recorded sessions in .agents/context-flow/last_session.json\n");
+    return;
+  }
+  console.log(`
+\u{1F4CB} === Recent Sessions Buffer (${list.length}) ===`);
+  list.forEach((s, idx) => {
+    console.log(`  ${idx + 1}. [${s.conversationId}] (${s.updatedAt})`);
+    console.log(`     Last Query: "${s.lastQuery}"`);
+  });
+  console.log("");
+}
+function handleCustomMessage(args) {
+  const workspaceRoot = process.cwd();
+  if (args.length === 0) {
+    const current = loadCustomMessage(workspaceRoot);
+    if (!current) {
+      console.log("\n\u2139\uFE0F  No custom message configured in .agents/context-flow/custom_message.txt");
+      console.log('Usage: context-flow message "<your custom message>"\n');
+      return;
+    }
+    console.log("\n\u{1F4DD} === Active Custom Message ===");
+    console.log(current);
+    console.log("\n(Injected on every turn in PreInvocation)\n");
+    return;
+  }
+  if (args[0] === "clear") {
+    saveCustomMessage(workspaceRoot, "");
+    console.log("\u2705 Cleared custom message (.agents/context-flow/custom_message.txt removed).");
+    return;
+  }
+  const messageText = args.join(" ");
+  saveCustomMessage(workspaceRoot, messageText);
+  console.log("\u2705 Saved custom message to .agents/context-flow/custom_message.txt");
+  console.log(`
+Active message:
+"${messageText}"
+`);
 }
 function handleConfig(args) {
   const workspaceRoot = process.cwd();
   const config = loadConfig(workspaceRoot);
   if (args.length === 0) {
     if (!config) {
-      console.log("\n\u26A0\uFE0F  Status: Disabled in this project (No .agents/file-recommand/config.json).");
-      console.log("Run `node bin/recommand.cjs init` to enable.\n");
+      console.log("\n\u26A0\uFE0F  Status: Disabled in this project (No .agents/context-flow/config.json).");
+      console.log("Run `node plugins/agy-context-flow/bin/context-flow.cjs init` to enable.\n");
       return;
     }
-    console.log("\n\u2699\uFE0F === Current agy-file-recommand Configuration ===");
+    console.log("\n\u2699\uFE0F === Current agy-context-flow Configuration ===");
     console.log(JSON.stringify(config, null, 2));
     console.log("");
     return;
@@ -1078,10 +1480,18 @@ function handleConfig(args) {
     const key = args[1];
     const value = args[2];
     if (!key || value === void 0) {
-      console.log("Usage: file-recommand config set <record.enabled|recommend.enabled|recommend.threshold|recommend.maxItems> <value>");
+      console.log(
+        "Usage: context-flow config set <record.enabled|recommend.enabled|recommend.threshold|recommend.maxItems|recommend.confidenceFormat|recommend.confidenceTiers.high|recommend.confidenceTiers.medium|recommend.confidenceTiers.low|continuity.enabled|continuity.maxSessions> <value>"
+      );
       return;
     }
     const currentConfig = config || { ...DEFAULT_CONFIG };
+    if (!currentConfig.recommend.confidenceTiers) {
+      currentConfig.recommend.confidenceTiers = { high: 0.75, medium: 0.5, low: 0.35 };
+    }
+    if (!currentConfig.continuity) {
+      currentConfig.continuity = { enabled: true, maxSessions: 5 };
+    }
     if (key === "record.enabled") {
       currentConfig.record.enabled = value === "true" || value === "1";
     } else if (key === "recommend.enabled") {
@@ -1090,12 +1500,28 @@ function handleConfig(args) {
       currentConfig.recommend.threshold = parseFloat(value);
     } else if (key === "recommend.maxItems") {
       currentConfig.recommend.maxItems = parseInt(value, 10);
+    } else if (key === "recommend.confidenceFormat") {
+      if (value !== "categorical" && value !== "numeric" && value !== "hidden") {
+        console.log("Invalid format. Must be 'categorical', 'numeric', or 'hidden'.");
+        return;
+      }
+      currentConfig.recommend.confidenceFormat = value;
+    } else if (key === "recommend.confidenceTiers.high") {
+      currentConfig.recommend.confidenceTiers.high = parseFloat(value);
+    } else if (key === "recommend.confidenceTiers.medium") {
+      currentConfig.recommend.confidenceTiers.medium = parseFloat(value);
+    } else if (key === "recommend.confidenceTiers.low") {
+      currentConfig.recommend.confidenceTiers.low = parseFloat(value);
+    } else if (key === "continuity.enabled") {
+      currentConfig.continuity.enabled = value === "true" || value === "1";
+    } else if (key === "continuity.maxSessions") {
+      currentConfig.continuity.maxSessions = parseInt(value, 10);
     } else {
       console.log(`Unknown config key: ${key}`);
       return;
     }
     saveConfig(currentConfig, workspaceRoot);
-    console.log(`\u2705 Config updated in .agents/file-recommand/config.json: ${key} = ${value}`);
+    console.log(`\u2705 Config updated in .agents/context-flow/config.json: ${key} = ${value}`);
   }
 }
 async function main() {
@@ -1105,7 +1531,7 @@ async function main() {
   if (command === "hook") {
     if (subCommand === "pre-invocation") {
       await handlePreInvocation();
-    } else if (subCommand === "post-invocation") {
+    } else if (subCommand === "post-invocation" || subCommand === "stop") {
       await handlePostInvocation();
     } else {
       console.error(`Unknown hook command: ${subCommand}`);
@@ -1118,17 +1544,21 @@ async function main() {
   } else if (command === "list") {
     const limit = args[1] ? parseInt(args[1], 10) : 10;
     handleList(limit);
+  } else if (command === "sessions") {
+    handleSessions();
+  } else if (command === "message" || command === "custom-message") {
+    handleCustomMessage(args.slice(1));
   } else if (command === "recommend") {
     const query = args.slice(1).join(" ");
     if (!query) {
-      console.error("Please provide a query: file-recommand recommend '<query>'");
+      console.error("Please provide a query: context-flow recommend '<query>'");
       process.exit(1);
     }
     handleRecommend(query);
   } else if (command === "config") {
     handleConfig(args.slice(1));
   } else {
-    console.log("Usage: file-recommand [init | config [set <k> <v>] | hook <pre-invocation|post-invocation> | stats | list | recommend <query>]");
+    console.log("Usage: context-flow [init | config [set <k> <v>] | message [<text>|clear] | sessions | hook <pre-invocation|post-invocation> | stats | list | recommend <query>]");
   }
 }
 main().catch((err) => {

@@ -35,6 +35,14 @@ export interface TranscriptStep {
   }>;
 }
 
+export type ConfidenceFormat = "categorical" | "numeric" | "hidden";
+
+export interface ConfidenceTiers {
+  high: number;
+  medium: number;
+  low: number;
+}
+
 export interface RecommendationItem {
   path: string;
   score: number;
@@ -45,3 +53,26 @@ export interface RecommendationResult {
   items: RecommendationItem[];
   mode: "SUGGESTION_HINT" | "NONE";
 }
+
+export interface ContinuityConfig {
+  enabled: boolean;
+  maxSessions?: number;
+}
+
+export interface SessionSnapshot {
+  conversationId: string;
+  updatedAt: string;
+  lastQuery: string;
+}
+
+export type LastSessionState = SessionSnapshot | SessionSnapshot[];
+
+export interface ContinuityResult {
+  isContinuity: boolean;
+  recentSessions?: SessionSnapshot[];
+  previousId?: string;
+  lastQuery?: string;
+  updatedAt?: string;
+}
+
+

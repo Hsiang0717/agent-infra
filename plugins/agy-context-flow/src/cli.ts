@@ -1,11 +1,31 @@
 import * as fs from "node:fs";
+import * as path from "node:path";
 import { randomUUID } from "node:crypto";
 import { HookInput, Episode } from "./types.js";
 import { parseLastTurn } from "./parser.js";
 import { getGitModifiedFiles } from "./git.js";
-import { saveEpisode, loadEpisodes, getStats } from "./store.js";
+import {
+  saveEpisode,
+  loadEpisodes,
+  getStats,
+  saveSessionSnapshot,
+  loadRecentSessions,
+  saveLastSessionState,
+  loadLastSessionState,
+  loadCustomMessage,
+  saveCustomMessage,
+} from "./store.js";
 import { recommendFiles } from "./recommender.js";
-import { loadConfig, saveConfig, DEFAULT_CONFIG, isPluginEnabled } from "./config.js";
+import { evaluateSessionContinuity } from "./continuity.js";
+import {
+  loadConfig,
+  saveConfig,
+  DEFAULT_CONFIG,
+  isPluginEnabled,
+  formatConfidence,
+  initWorkspace,
+  findWorkspaceRoot,
+} from "./config.js";
 
 async function readStdin(timeoutMs = 1500): Promise<string> {
   if (process.stdin.isTTY) return "";
@@ -59,7 +79,7 @@ async function handlePreInvocation() {
     const workspaceRoot = getWorkspaceRoot(input);
     const config = loadConfig(workspaceRoot);
 
-    if (!config || !config.recommend.enabled) {
+    if (!config) {
       console.log(JSON.stringify({ injectSteps: [] }));
       return;
     }
@@ -76,19 +96,63 @@ async function handlePreInvocation() {
       return;
     }
 
-    const recommendation = recommendFiles(parsed.query, workspaceRoot, config, input.conversationId);
-    if (recommendation.mode === "SUGGESTION_HINT" && recommendation.items.length > 0) {
-      const xmlItems = recommendation.items.map(
-        (item) => `  <file path="${item.path}" confidence="${item.score.toFixed(2)}" reason="${item.reasons.join(",")}" />`
+    const injectMessages: string[] = [];
+
+    // 1. Session Continuity Check (Handover only on 1st turn of new session)
+    if (config.continuity?.enabled) {
+      const continuityResult = evaluateSessionContinuity(
+        input.conversationId,
+        workspaceRoot,
+        config
       );
+      if (
+        continuityResult.isContinuity &&
+        continuityResult.recentSessions &&
+        continuityResult.recentSessions.length > 0
+      ) {
+        const sessionLines = continuityResult.recentSessions.map((s) => {
+          const queryAttr = s.lastQuery
+            ? ` last_query="${s.lastQuery.replace(/"/g, "&quot;")}"`
+            : "";
+          const updatedAttr = s.updatedAt
+            ? ` updated_at="${s.updatedAt}"`
+            : "";
+          return `  <session id="${s.conversationId}"${queryAttr}${updatedAttr} />`;
+        });
+        const continuityXml = `<recent_sessions>\n${sessionLines.join("\n")}\n</recent_sessions>`;
+        injectMessages.push(continuityXml);
+      }
+    }
 
-      const message = `<context_recommendations source="file-recommand">\n${xmlItems.join("\n")}\n</context_recommendations>`;
+    // 2. Custom Message Injection (Injected on every turn if configured)
+    const customMessage = loadCustomMessage(workspaceRoot);
+    if (customMessage) {
+      const customXml = `<custom_message>\n${customMessage}\n</custom_message>`;
+      injectMessages.push(customXml);
+    }
 
+    // 3. File Recommendations
+    if (config.recommend.enabled) {
+      const recommendation = recommendFiles(parsed.query, workspaceRoot, config, input.conversationId);
+      if (recommendation.mode === "SUGGESTION_HINT" && recommendation.items.length > 0) {
+        const format = config.recommend.confidenceFormat ?? "categorical";
+        const xmlItems = recommendation.items.map((item) => {
+          const conf = formatConfidence(item.score, format, config.recommend.confidenceTiers);
+          const confAttr = conf !== null ? ` confidence="${conf}"` : "";
+          return `  <file path="${item.path}"${confAttr} reason="${item.reasons.join(",")}" />`;
+        });
+
+        const recMessage = `<context_recommendations source="context-flow">\n${xmlItems.join("\n")}\n</context_recommendations>`;
+        injectMessages.push(recMessage);
+      }
+    }
+
+    if (injectMessages.length > 0) {
       console.log(
         JSON.stringify({
           injectSteps: [
             {
-              ephemeralMessage: message,
+              ephemeralMessage: injectMessages.join("\n\n"),
             },
           ],
         })
@@ -135,6 +199,10 @@ async function handlePostInvocation() {
 
     const parsed = parseLastTurn(transcriptPath, workspaceRoot || process.cwd());
     if (parsed && parsed.query) {
+      const nowIso = new Date().toISOString();
+      const currentConvId = input.conversationId || "unknown";
+      const gitFiles = getGitModifiedFiles(workspaceRoot);
+
       // Noise filter & Action deduplication:
       // Only record episodes that have concrete file operations or citations
       const hasAction =
@@ -143,12 +211,10 @@ async function handlePostInvocation() {
         parsed.citedFiles.length > 0;
 
       if (hasAction) {
-        const gitFiles = getGitModifiedFiles(workspaceRoot);
-
         const episode: Episode = {
           id: randomUUID().replace(/-/g, "").slice(0, 12),
-          timestamp: new Date().toISOString(),
-          conversationId: input.conversationId || "unknown",
+          timestamp: nowIso,
+          conversationId: currentConvId,
           query: parsed.query,
           thinkingTokens: parsed.thinkingTokens,
           readFiles: parsed.readFiles,
@@ -159,7 +225,20 @@ async function handlePostInvocation() {
 
         saveEpisode(workspaceRoot, episode);
       }
+
+      // Always update Last Session Snapshot for Session Continuity
+      const maxSessions = config.continuity?.maxSessions ?? 5;
+      saveSessionSnapshot(
+        workspaceRoot,
+        {
+          conversationId: currentConvId,
+          updatedAt: nowIso,
+          lastQuery: parsed.query,
+        },
+        maxSessions
+      );
     }
+
 
     console.log(JSON.stringify({}));
   } catch {
@@ -168,27 +247,43 @@ async function handlePostInvocation() {
 }
 
 function handleInit() {
-  const workspaceRoot = process.cwd();
-  if (isPluginEnabled(workspaceRoot)) {
-    console.log("ℹ️  agy-file-recommand is already initialized in this project (.agents/file-recommand/config.json).");
-    return;
+  const workspaceRoot = findWorkspaceRoot() || process.cwd();
+  
+  let binRelPath = "plugins/agy-context-flow/bin/context-flow.cjs";
+  if (process.argv[1]) {
+    const executedScript = path.resolve(process.argv[1]);
+    const relToWs = path.relative(workspaceRoot, executedScript).replace(/\\/g, "/");
+    if (!relToWs.startsWith("..") && !path.isAbsolute(relToWs)) {
+      binRelPath = relToWs;
+    }
   }
-  saveConfig(DEFAULT_CONFIG, workspaceRoot);
-  console.log("✅ Initialized agy-file-recommand for this project!");
-  console.log("Created: .agents/file-recommand/config.json");
+
+  const result = initWorkspace(workspaceRoot, binRelPath);
+
+  if (result.configCreated) {
+    console.log("✅ Created configuration: .agents/context-flow/config.json");
+  } else {
+    console.log("ℹ️  Configuration already present: .agents/context-flow/config.json");
+  }
+
+  if (result.hooksUpdated) {
+    console.log("✅ Registered lifecycle hooks in: .agents/hooks.json");
+  }
+
+  console.log("🚀 agy-context-flow initialized and active!");
 }
 
 function handleStats() {
   const workspaceRoot = process.cwd();
   const config = loadConfig(workspaceRoot);
   if (!config) {
-    console.log("⚠️  Plugin is not enabled in this project. Run `node bin/recommand.cjs init` to enable.");
+    console.log("⚠️  Plugin is not enabled in this project. Run `node plugins/agy-context-flow/bin/context-flow.cjs init` to enable.");
     return;
   }
 
   const stats = getStats(workspaceRoot);
 
-  console.log("\n📊 === agy-file-recommand Statistics ===");
+  console.log("\n📊 === agy-context-flow Statistics ===");
   console.log(`Total Episodes Recorded: ${stats.totalEpisodes}`);
   console.log(`Avg Read Files / Turn  : ${stats.avgReadFilesPerTurn}`);
   console.log(`Avg Edited Files / Turn: ${stats.avgEditedFilesPerTurn}`);
@@ -211,7 +306,7 @@ function handleList(limit = 10) {
   const workspaceRoot = process.cwd();
   const config = loadConfig(workspaceRoot);
   if (!config) {
-    console.log("⚠️  Plugin is not enabled in this project. Run `node bin/recommand.cjs init` to enable.");
+    console.log("⚠️  Plugin is not enabled in this project. Run `node plugins/agy-context-flow/bin/context-flow.cjs init` to enable.");
     return;
   }
 
@@ -238,7 +333,7 @@ function handleRecommend(query: string) {
   const workspaceRoot = process.cwd();
   const config = loadConfig(workspaceRoot);
   if (!config) {
-    console.log("⚠️  Plugin is not enabled in this project. Run `node bin/recommand.cjs init` to enable.");
+    console.log("⚠️  Plugin is not enabled in this project. Run `node plugins/agy-context-flow/bin/context-flow.cjs init` to enable.");
     return;
   }
 
@@ -250,11 +345,59 @@ function handleRecommend(query: string) {
   } else {
     console.log(`  Result (${result.items.length} suggestions):`);
     result.items.forEach((item, idx) => {
-      console.log(`  ${idx + 1}. ${item.path} (Score: ${(item.score * 100).toFixed(0)}%)`);
+      const conf = formatConfidence(
+        item.score,
+        config.recommend.confidenceFormat ?? "categorical",
+        config.recommend.confidenceTiers
+      );
+      const confLabel = conf !== null ? ` [${conf}]` : "";
+      console.log(`  ${idx + 1}. ${item.path}${confLabel} (Score: ${(item.score * 100).toFixed(0)}%)`);
       item.reasons.forEach((r) => console.log(`     - ${r}`));
     });
   }
   console.log("");
+}
+
+function handleSessions() {
+  const workspaceRoot = process.cwd();
+  const list = loadRecentSessions(workspaceRoot);
+  if (list.length === 0) {
+    console.log("\nℹ️  No recorded sessions in .agents/context-flow/last_session.json\n");
+    return;
+  }
+  console.log(`\n📋 === Recent Sessions Buffer (${list.length}) ===`);
+  list.forEach((s, idx) => {
+    console.log(`  ${idx + 1}. [${s.conversationId}] (${s.updatedAt})`);
+    console.log(`     Last Query: "${s.lastQuery}"`);
+  });
+  console.log("");
+}
+
+function handleCustomMessage(args: string[]) {
+  const workspaceRoot = process.cwd();
+  if (args.length === 0) {
+    const current = loadCustomMessage(workspaceRoot);
+    if (!current) {
+      console.log("\nℹ️  No custom message configured in .agents/context-flow/custom_message.txt");
+      console.log("Usage: context-flow message \"<your custom message>\"\n");
+      return;
+    }
+    console.log("\n📝 === Active Custom Message ===");
+    console.log(current);
+    console.log("\n(Injected on every turn in PreInvocation)\n");
+    return;
+  }
+
+  if (args[0] === "clear") {
+    saveCustomMessage(workspaceRoot, "");
+    console.log("✅ Cleared custom message (.agents/context-flow/custom_message.txt removed).");
+    return;
+  }
+
+  const messageText = args.join(" ");
+  saveCustomMessage(workspaceRoot, messageText);
+  console.log("✅ Saved custom message to .agents/context-flow/custom_message.txt");
+  console.log(`\nActive message:\n"${messageText}"\n`);
 }
 
 function handleConfig(args: string[]) {
@@ -263,11 +406,11 @@ function handleConfig(args: string[]) {
 
   if (args.length === 0) {
     if (!config) {
-      console.log("\n⚠️  Status: Disabled in this project (No .agents/file-recommand/config.json).");
-      console.log("Run `node bin/recommand.cjs init` to enable.\n");
+      console.log("\n⚠️  Status: Disabled in this project (No .agents/context-flow/config.json).");
+      console.log("Run `node plugins/agy-context-flow/bin/context-flow.cjs init` to enable.\n");
       return;
     }
-    console.log("\n⚙️ === Current agy-file-recommand Configuration ===");
+    console.log("\n⚙️ === Current agy-context-flow Configuration ===");
     console.log(JSON.stringify(config, null, 2));
     console.log("");
     return;
@@ -279,11 +422,19 @@ function handleConfig(args: string[]) {
     const value = args[2];
 
     if (!key || value === undefined) {
-      console.log("Usage: file-recommand config set <record.enabled|recommend.enabled|recommend.threshold|recommend.maxItems> <value>");
+      console.log(
+        "Usage: context-flow config set <record.enabled|recommend.enabled|recommend.threshold|recommend.maxItems|recommend.confidenceFormat|recommend.confidenceTiers.high|recommend.confidenceTiers.medium|recommend.confidenceTiers.low|continuity.enabled|continuity.maxSessions> <value>"
+      );
       return;
     }
 
     const currentConfig = config || { ...DEFAULT_CONFIG };
+    if (!currentConfig.recommend.confidenceTiers) {
+      currentConfig.recommend.confidenceTiers = { high: 0.75, medium: 0.5, low: 0.35 };
+    }
+    if (!currentConfig.continuity) {
+      currentConfig.continuity = { enabled: true, maxSessions: 5 };
+    }
 
     if (key === "record.enabled") {
       currentConfig.record.enabled = value === "true" || value === "1";
@@ -293,13 +444,29 @@ function handleConfig(args: string[]) {
       currentConfig.recommend.threshold = parseFloat(value);
     } else if (key === "recommend.maxItems") {
       currentConfig.recommend.maxItems = parseInt(value, 10);
+    } else if (key === "recommend.confidenceFormat") {
+      if (value !== "categorical" && value !== "numeric" && value !== "hidden") {
+        console.log("Invalid format. Must be 'categorical', 'numeric', or 'hidden'.");
+        return;
+      }
+      currentConfig.recommend.confidenceFormat = value;
+    } else if (key === "recommend.confidenceTiers.high") {
+      currentConfig.recommend.confidenceTiers.high = parseFloat(value);
+    } else if (key === "recommend.confidenceTiers.medium") {
+      currentConfig.recommend.confidenceTiers.medium = parseFloat(value);
+    } else if (key === "recommend.confidenceTiers.low") {
+      currentConfig.recommend.confidenceTiers.low = parseFloat(value);
+    } else if (key === "continuity.enabled") {
+      currentConfig.continuity.enabled = value === "true" || value === "1";
+    } else if (key === "continuity.maxSessions") {
+      currentConfig.continuity.maxSessions = parseInt(value, 10);
     } else {
       console.log(`Unknown config key: ${key}`);
       return;
     }
 
     saveConfig(currentConfig, workspaceRoot);
-    console.log(`✅ Config updated in .agents/file-recommand/config.json: ${key} = ${value}`);
+    console.log(`✅ Config updated in .agents/context-flow/config.json: ${key} = ${value}`);
   }
 }
 
@@ -311,7 +478,7 @@ async function main() {
   if (command === "hook") {
     if (subCommand === "pre-invocation") {
       await handlePreInvocation();
-    } else if (subCommand === "post-invocation") {
+    } else if (subCommand === "post-invocation" || subCommand === "stop") {
       await handlePostInvocation();
     } else {
       console.error(`Unknown hook command: ${subCommand}`);
@@ -324,17 +491,21 @@ async function main() {
   } else if (command === "list") {
     const limit = args[1] ? parseInt(args[1], 10) : 10;
     handleList(limit);
+  } else if (command === "sessions") {
+    handleSessions();
+  } else if (command === "message" || command === "custom-message") {
+    handleCustomMessage(args.slice(1));
   } else if (command === "recommend") {
     const query = args.slice(1).join(" ");
     if (!query) {
-      console.error("Please provide a query: file-recommand recommend '<query>'");
+      console.error("Please provide a query: context-flow recommend '<query>'");
       process.exit(1);
     }
     handleRecommend(query);
   } else if (command === "config") {
     handleConfig(args.slice(1));
   } else {
-    console.log("Usage: file-recommand [init | config [set <k> <v>] | hook <pre-invocation|post-invocation> | stats | list | recommend <query>]");
+    console.log("Usage: context-flow [init | config [set <k> <v>] | message [<text>|clear] | sessions | hook <pre-invocation|post-invocation> | stats | list | recommend <query>]");
   }
 }
 

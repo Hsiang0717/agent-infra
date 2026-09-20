@@ -2,15 +2,15 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { RecommendationItem, RecommendationResult } from "./types.js";
 import { loadEpisodes } from "./store.js";
-import { getGitModifiedFiles, getGitTrackedFiles } from "./git.js";
-import { loadConfig, RecommandConfig } from "./config.js";
+import { getGitModifiedFiles, getGitTrackedFiles, getGitRecentFiles } from "./git.js";
+import { loadConfig, ContextFlowConfig } from "./config.js";
 import { BM25, Document } from "./bm25.js";
 import { SemanticVectorEngine, VectorDocument } from "./vector.js";
 
 export function tokenize(text: string): string[] {
   const tokens = new Set<string>();
 
-  // 1. Extract path/file tokens intact: e.g. "src/parser.ts" or "recommand.cjs"
+  // 1. Extract path/file tokens intact: e.g. "src/parser.ts" or "context-flow.cjs"
   const pathRegex = /[a-zA-Z0-9_\-\./]+\.[a-zA-Z0-9_-]+/g;
   let match: RegExpExecArray | null;
   while ((match = pathRegex.exec(text)) !== null) {
@@ -64,7 +64,7 @@ export function isConceptualQuery(query: string): boolean {
 export function recommendFiles(
   query: string,
   workspaceRoot?: string,
-  customConfig?: RecommandConfig | null,
+  customConfig?: ContextFlowConfig | null,
   currentConversationId?: string
 ): RecommendationResult {
   const config = customConfig !== undefined ? customConfig : loadConfig(workspaceRoot);
@@ -78,30 +78,48 @@ export function recommendFiles(
     return { items: [], mode: "NONE" };
   }
 
-  // Record probability factors and reasons for Noisy-OR fusion: S = 1 - Prod(1 - p_i)
-  const candidateSignals: Record<string, { probs: number[]; reasons: string[] }> = {};
+  // Dual-Priors Bayesian Scoring Containers:
+  // P(f) = Static Structural Prior (Git modified, recency, entrypoint, tree overlap)
+  // P(q|f) = Dynamic Semantic Likelihood (Direct path, BM25, SVD-FastText)
+  const candidatePriors: Record<string, { probs: number[]; reasons: string[] }> = {};
+  const candidateSemantics: Record<string, { probs: number[]; reasons: string[] }> = {};
 
-  const addSignal = (file: string, probability: number, reason: string) => {
+  const addPrior = (file: string, probability: number, reason: string) => {
     if (!file || probability <= 0) return;
     const normalized = file.replace(/\\/g, "/").replace(/^\.\//, "").trim();
-    if (!candidateSignals[normalized]) {
-      candidateSignals[normalized] = { probs: [], reasons: [] };
+    if (!candidatePriors[normalized]) {
+      candidatePriors[normalized] = { probs: [], reasons: [] };
     }
-    const clampedProb = Math.max(0.01, Math.min(0.95, probability));
-    candidateSignals[normalized].probs.push(clampedProb);
-    if (!candidateSignals[normalized].reasons.includes(reason)) {
-      candidateSignals[normalized].reasons.push(reason);
+    const clamped = Math.max(0.01, Math.min(0.95, probability));
+    candidatePriors[normalized].probs.push(clamped);
+    if (!candidatePriors[normalized].reasons.includes(reason)) {
+      candidatePriors[normalized].reasons.push(reason);
     }
   };
 
-  // 1. Direct path/filename mentioned in query (High Confidence: 0.8)
+  const addSemantic = (file: string, probability: number, reason: string) => {
+    if (!file || probability <= 0) return;
+    const normalized = file.replace(/\\/g, "/").replace(/^\.\//, "").trim();
+    if (!candidateSemantics[normalized]) {
+      candidateSemantics[normalized] = { probs: [], reasons: [] };
+    }
+    const clamped = Math.max(0.01, Math.min(0.95, probability));
+    candidateSemantics[normalized].probs.push(clamped);
+    if (!candidateSemantics[normalized].reasons.includes(reason)) {
+      candidateSemantics[normalized].reasons.push(reason);
+    }
+  };
+
+  // --- CHANNEL 1: Dynamic Semantic Likelihood P(q|f) ---
+
+  // 1. Direct path/filename mentioned in query (High Confidence: 0.85)
   for (const token of queryTokens) {
     if (token.includes("/") || token.includes(".")) {
-      addSignal(token, 0.8, "direct_path");
+      addSemantic(token, 0.85, "direct_path");
     }
   }
 
-  // 2. Historical similarity using BM25 & Semantic Vector Engine (PPMI-SVD + Cosine + Turn-based Step Decay)
+  // 2. Historical similarity using BM25 & Semantic Vector Engine (PPMI-SVD + FastText + Turn-based Step Decay)
   const episodes = loadEpisodes(workspaceRoot, 100);
   const totalEps = episodes.length;
 
@@ -129,18 +147,18 @@ export function recommendFiles(
           const sessionMultiplier = isCurrentSession ? 1.25 : 1.0;
           const decay = Math.min(1.0, stepDecay * sessionMultiplier);
 
-          const confidence = Math.min(0.6, Number((Math.max(score * 0.15, 0.35) * decay).toFixed(2)));
+          const confidence = Math.min(0.65, Number((Math.max(score * 0.15, 0.35) * decay).toFixed(2)));
           for (const f of ep.editedFiles) {
-            addSignal(f, confidence, isCurrentSession ? "active_session_edit" : "historical_edit");
+            addSemantic(f, confidence, isCurrentSession ? "active_session_edit" : "historical_edit");
           }
           for (const f of ep.citedFiles) {
-            addSignal(f, confidence * 0.7, isCurrentSession ? "active_session_cite" : "historical_cite");
+            addSemantic(f, confidence * 0.7, isCurrentSession ? "active_session_cite" : "historical_cite");
           }
         }
       }
     }
 
-    // B. Semantic Vector Engine (PPMI-SVD + Cosine Similarity)
+    // B. Semantic Vector Engine (PPMI-SVD + FastText Subwords + Cosine Similarity)
     const vecDocs: VectorDocument[] = episodes.map((ep) => ({
       id: ep.id,
       tokens: Array.from(new Set([...tokenize(ep.query), ...(ep.thinkingTokens || [])])),
@@ -153,7 +171,7 @@ export function recommendFiles(
     // Direct Context/File cosine similarity
     for (const [file, sim] of vectorResult.fileScores.entries()) {
       if (sim > 0.3) {
-        addSignal(file, Math.min(0.55, Number(sim.toFixed(2))), "semantic_cosine");
+        addSemantic(file, Math.min(0.6, Number(sim.toFixed(2))), "semantic_cosine");
       }
     }
 
@@ -163,41 +181,90 @@ export function recommendFiles(
         const ep = episodes.find((e) => e.id === epId);
         if (ep) {
           for (const f of ep.editedFiles) {
-            addSignal(f, Math.min(0.5, Number((sim * 0.8).toFixed(2))), "cross_lingual_semantic");
+            addSemantic(f, Math.min(0.55, Number((sim * 0.8).toFixed(2))), "cross_lingual_semantic");
           }
         }
       }
     }
   }
 
-  // 3. Project Tree Cold-Start Matching (for unseen files or sparse episodes)
+  // --- CHANNEL 2: Static Structural Prior P(f) ---
+
+  // 1. Project Tree Path Match (Token overlap with repo files)
   const trackedFiles = getGitTrackedFiles(workspaceRoot);
   for (const file of trackedFiles) {
     const fileTokens = tokenize(file);
     const overlap = fileTokens.filter((t) => queryTokens.includes(t) && t.length > 2 && !t.includes("/"));
     if (overlap.length >= 2) {
-      addSignal(file, Math.min(0.5, 0.25 * overlap.length), "tree_path_match");
+      addPrior(file, Math.min(0.5, 0.25 * overlap.length), "tree_path_match");
+    }
+
+    // Entrypoint baseline prior (e.g., index.ts, main.ts, app.ts)
+    const baseName = path.basename(file).toLowerCase();
+    if (/^(index|main|app|server|cli)\.(ts|js|rs|go|py)$/.test(baseName)) {
+      addPrior(file, 0.15, "entrypoint_prior");
     }
   }
 
-  // 4. Git modified files (Base Confidence: 0.3)
+  // 2. Git modified files (Active Working Tree: 0.40)
   const gitFiles = getGitModifiedFiles(workspaceRoot);
   for (const f of gitFiles) {
-    addSignal(f, 0.3, "git_modified");
+    addPrior(f, 0.4, "git_modified");
   }
 
+  // 3. Git Recent Commits (Recency gravity: 0.15 ~ 0.40)
+  const recentFiles = getGitRecentFiles(workspaceRoot, 15);
+  for (const [f, score] of recentFiles.entries()) {
+    addPrior(f, score, "git_recent_active");
+  }
+
+  // --- CHANNEL 3: Dirichlet Shrinkage & Bayesian Posterior Fusion ---
+  // Lambda(N) = N / (N + mu), where mu = 4
+  const mu = 4;
+  const lambda = totalEps / (totalEps + mu);
+
+  // w_prior: starts at 1.0 (cold start), smoothly settles to 0.6 (warm start)
+  const wPrior = (0.6 * totalEps + mu) / (totalEps + mu);
+  // w_semantic: starts at 0.5 (cold start), smoothly rises to 1.0 (warm start)
+  const wSemantic = (totalEps + 0.5 * mu) / (totalEps + mu);
+
+  const allCandidateKeys = new Set([...Object.keys(candidatePriors), ...Object.keys(candidateSemantics)]);
   const maxItems = config.recommend.maxItems ?? 3;
   const threshold = config.recommend.threshold ?? 0.35;
 
-  const items: RecommendationItem[] = Object.entries(candidateSignals)
-    .map(([filePath, data]) => {
-      // Noisy-OR probabilistic fusion: S = 1 - Prod(1 - p_i)
-      const complementProduct = data.probs.reduce((acc, p) => acc * (1 - p), 1.0);
-      const noisyOrScore = 1.0 - complementProduct;
+  const items: RecommendationItem[] = Array.from(allCandidateKeys)
+    .map((filePath) => {
+      const priorData = candidatePriors[filePath];
+      const semanticData = candidateSemantics[filePath];
+
+      const pPrior = priorData
+        ? 1.0 - priorData.probs.reduce((acc, p) => acc * (1.0 - p), 1.0)
+        : 0;
+      const pSemantic = semanticData
+        ? 1.0 - semanticData.probs.reduce((acc, p) => acc * (1.0 - p), 1.0)
+        : 0;
+
+      // Penalize test/declaration files in prior if not explicitly requested
+      let penalty = 1.0;
+      if (/\.(test|spec)\.[a-zA-Z0-9]+$/.test(filePath) || filePath.endsWith(".d.ts")) {
+        penalty = 0.6;
+      }
+
+      const effectivePrior = pPrior * penalty;
+
+      // Dual-Priors Bayesian Noisy-OR Fusion with Dirichlet Shrinkage
+      const uncertPrior = Math.pow(1.0 - effectivePrior, wPrior);
+      const uncertSemantic = Math.pow(1.0 - pSemantic, wSemantic);
+      const posteriorScore = 1.0 - uncertPrior * uncertSemantic;
+
+      const reasons = Array.from(
+        new Set([...(priorData?.reasons || []), ...(semanticData?.reasons || [])])
+      );
+
       return {
         path: filePath,
-        score: Number(Math.min(0.98, noisyOrScore).toFixed(2)),
-        reasons: data.reasons,
+        score: Number(Math.min(0.98, posteriorScore).toFixed(2)),
+        reasons,
       };
     })
     .filter((item) => {

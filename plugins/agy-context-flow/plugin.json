@@ -1,0 +1,4 @@
+{
+  "name": "agy-context-flow",
+  "description": "Autonomous context flow engine & causal episode tracker for Antigravity: captures query, read, edit, citation, and git diff causality loop."
+}

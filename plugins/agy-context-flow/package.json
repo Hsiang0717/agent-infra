@@ -1,0 +1,30 @@
+{
+  "name": "agy-context-flow",
+  "version": "1.0.0",
+  "description": "Autonomous context flow engine & causal episode tracker for Antigravity",
+  "type": "commonjs",
+  "bin": {
+    "context-flow": "./bin/context-flow.cjs",
+    "agy-context-flow": "./bin/context-flow.cjs"
+  },
+  "scripts": {
+    "build": "node build.mjs",
+    "test": "node build.mjs && npx esbuild tests/context-flow.test.ts --bundle --platform=node --outfile=dist/context-flow.test.cjs && node --test dist/context-flow.test.cjs"
+  },
+  "keywords": [
+    "antigravity",
+    "plugin",
+    "skill",
+    "context-flow",
+    "agy-context-flow",
+    "context-recommendation"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {},
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "esbuild": "^0.25.0",
+    "typescript": "^5.7.0"
+  }
+}

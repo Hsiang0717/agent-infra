@@ -146,6 +146,25 @@ export function truncatedSVD(
   return { U, S, V };
 }
 
+/**
+ * FastText character-level n-gram (subword) extraction.
+ * Extracts n-grams of length 3..4 with boundary symbols `<` and `>`
+ * for alphanumeric/identifier tokens with length >= 4.
+ */
+export function extractSubwords(word: string, minN = 3, maxN = 4): string[] {
+  if (word.length < minN || !/^[a-zA-Z0-9_]+$/.test(word)) return [];
+  const subwords: string[] = [];
+  const wrapped = `<${word.toLowerCase()}>`;
+  const len = wrapped.length;
+
+  for (let n = minN; n <= Math.min(maxN, len); n++) {
+    for (let i = 0; i <= len - n; i++) {
+      subwords.push(wrapped.slice(i, i + n));
+    }
+  }
+  return subwords;
+}
+
 export class SemanticVectorEngine {
   private vocab: Map<string, number> = new Map(); // word -> index
   private vocabList: string[] = [];
@@ -164,27 +183,38 @@ export class SemanticVectorEngine {
   private buildIndex(docs: VectorDocument[]): void {
     if (docs.length === 0) return;
 
-    // 1. Build vocabulary and context indices
+    // 1. Build vocabulary and context indices (including FastText Subwords)
     const wordCounts = new Map<string, number>();
     const contextCounts = new Map<string, number>();
     const cooccur = new Map<string, Map<string, number>>();
 
     let totalCooccur = 0;
 
+    const recordToken = (token: string, uniqueFiles: string[]) => {
+      wordCounts.set(token, (wordCounts.get(token) || 0) + 1);
+      for (const file of uniqueFiles) {
+        contextCounts.set(file, (contextCounts.get(file) || 0) + 1);
+
+        if (!cooccur.has(token)) cooccur.set(token, new Map());
+        const map = cooccur.get(token)!;
+        map.set(file, (map.get(file) || 0) + 1);
+        totalCooccur++;
+      }
+    };
+
     for (const doc of docs) {
       const uniqueTokens = Array.from(new Set(doc.tokens));
       const uniqueFiles = Array.from(new Set(doc.files));
 
       for (const token of uniqueTokens) {
-        wordCounts.set(token, (wordCounts.get(token) || 0) + 1);
+        recordToken(token, uniqueFiles);
 
-        for (const file of uniqueFiles) {
-          contextCounts.set(file, (contextCounts.get(file) || 0) + 1);
-
-          if (!cooccur.has(token)) cooccur.set(token, new Map());
-          const map = cooccur.get(token)!;
-          map.set(file, (map.get(file) || 0) + 1);
-          totalCooccur++;
+        // FastText Subword expansion for code / identifier tokens
+        if (token.length >= 4) {
+          const subwords = extractSubwords(token);
+          for (const sw of subwords) {
+            recordToken(sw, uniqueFiles);
+          }
         }
       }
     }
@@ -261,7 +291,27 @@ export class SemanticVectorEngine {
     let count = 0;
 
     for (const token of tokens) {
-      const vec = this.wordEmbeddings.get(token);
+      let vec = this.wordEmbeddings.get(token);
+
+      // FastText OOV synthesis: synthesize vector from known Subword embeddings
+      if (!vec && token.length >= 4) {
+        const subwords = extractSubwords(token);
+        const subVec = new Array(k).fill(0);
+        let subCount = 0;
+
+        for (const sw of subwords) {
+          const swEmbedding = this.wordEmbeddings.get(sw);
+          if (swEmbedding) {
+            for (let i = 0; i < k; i++) subVec[i] += swEmbedding[i];
+            subCount++;
+          }
+        }
+
+        if (subCount > 0) {
+          vec = subVec.map((x) => x / subCount);
+        }
+      }
+
       if (vec) {
         for (let i = 0; i < vec.length; i++) {
           pooled[i] += vec[i];
