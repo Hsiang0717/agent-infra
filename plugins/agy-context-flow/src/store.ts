@@ -29,6 +29,67 @@ export function getLastSessionPath(workspaceRoot?: string): string | null {
   return path.join(dir, "last_session.json");
 }
 
+export function getSnippetsPath(workspaceRoot?: string): string | null {
+  const dir = getStoreDir(workspaceRoot);
+  if (!dir) return null;
+  return path.join(dir, "snippets.md");
+}
+
+export function loadSnippets(workspaceRoot?: string): Map<string, string> {
+  const snippets = new Map<string, string>();
+  const p = getSnippetsPath(workspaceRoot);
+  if (!p || !fs.existsSync(p)) return snippets;
+  try {
+    const raw = fs.readFileSync(p, "utf8");
+    const lines = raw.split(/\r?\n/);
+    let currentTag: string | null = null;
+    let currentLines: string[] = [];
+
+    const flush = () => {
+      if (currentTag && currentLines.length > 0) {
+        snippets.set(currentTag.toLowerCase(), currentLines.join("\n").trim());
+      }
+    };
+
+    for (const line of lines) {
+      const match = line.match(/^#+\s*([a-zA-Z0-9_\u4e00-\u9fa5\-]+)(?:\s+(.*))?$/);
+      if (match) {
+        flush();
+        currentTag = match[1];
+        currentLines = match[2] ? [match[2]] : [];
+      } else if (currentTag) {
+        currentLines.push(line);
+      }
+    }
+    flush();
+  } catch {
+    // Ignore read errors
+  }
+  return snippets;
+}
+
+export function saveSnippets(workspaceRoot: string | undefined, snippets: Map<string, string>): void {
+  const p = getSnippetsPath(workspaceRoot);
+  if (!p) return;
+  try {
+    if (snippets.size === 0) {
+      if (fs.existsSync(p)) fs.unlinkSync(p);
+      return;
+    }
+    const lines: string[] = [];
+    for (const [tag, content] of snippets.entries()) {
+      if (content.includes("\n")) {
+        lines.push(`#${tag}\n${content}\n`);
+      } else {
+        lines.push(`#${tag} ${content}`);
+      }
+    }
+    fs.writeFileSync(p, lines.join("\n").trim() + "\n", "utf8");
+  } catch {
+    // Ignore if unwritable
+  }
+}
+
 export function getCustomMessagePath(workspaceRoot?: string): string | null {
   const dir = getStoreDir(workspaceRoot);
   if (!dir) return null;

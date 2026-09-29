@@ -143,8 +143,10 @@ export function saveConfig(config: ContextFlowConfig, workspaceRoot?: string): b
 export interface InitResult {
   configCreated: boolean;
   hooksUpdated: boolean;
+  snippetsCreated: boolean;
   hooksPath: string;
   configPath: string;
+  snippetsPath: string;
 }
 
 export function initWorkspace(workspaceRoot?: string, customScriptRelPath?: string): InitResult {
@@ -215,11 +217,26 @@ export function initWorkspace(workspaceRoot?: string, customScriptRelPath?: stri
 
   fs.writeFileSync(hooksPath, JSON.stringify(existingHooks, null, 2), "utf8");
 
+  // 3. Snippets initialization (.agents/context-flow/snippets.md)
+  const snippetsDir = path.join(ws, ".agents", "context-flow");
+  if (!fs.existsSync(snippetsDir)) {
+    fs.mkdirSync(snippetsDir, { recursive: true });
+  }
+  const snippetsPath = path.join(snippetsDir, "snippets.md");
+  let snippetsCreated = false;
+  if (!fs.existsSync(snippetsPath)) {
+    const defaultSnippets = `#op 你的看法是?\n#rg 魯棒性和泛用性，你的看法是?\n`;
+    fs.writeFileSync(snippetsPath, defaultSnippets, "utf8");
+    snippetsCreated = true;
+  }
+
   return {
     configCreated: !configAlreadyExists,
     hooksUpdated: true,
+    snippetsCreated,
     hooksPath,
     configPath,
+    snippetsPath,
   };
 }
 

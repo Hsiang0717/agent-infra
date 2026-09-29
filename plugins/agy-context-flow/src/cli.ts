@@ -14,6 +14,8 @@ import {
   loadLastSessionState,
   loadCustomMessage,
   saveCustomMessage,
+  loadSnippets,
+  saveSnippets,
 } from "./store.js";
 import { recommendFiles } from "./recommender.js";
 import { evaluateSessionContinuity } from "./continuity.js";
@@ -124,11 +126,24 @@ async function handlePreInvocation() {
       }
     }
 
-    // 2. Custom Message Injection (Injected on every turn if configured)
-    const customMessage = loadCustomMessage(workspaceRoot);
-    if (customMessage) {
-      const customXml = `<custom_message>\n${customMessage}\n</custom_message>`;
-      injectMessages.push(customXml);
+    // 2. Custom Snippet Injection (Injected only when user query triggers #<tag>)
+    const snippets = loadSnippets(workspaceRoot);
+    if (snippets.size > 0 && parsed.query) {
+      const matches = Array.from(parsed.query.matchAll(/#([a-zA-Z0-9_\u4e00-\u9fa5\-]+)/g));
+      const matchedTags = Array.from(new Set(matches.map((m) => m[1].toLowerCase())));
+      const triggeredItems: string[] = [];
+
+      for (const tag of matchedTags) {
+        if (snippets.has(tag)) {
+          const content = snippets.get(tag)!;
+          triggeredItems.push(`  <item tag="#${tag}">${content}</item>`);
+        }
+      }
+
+      if (triggeredItems.length > 0) {
+        const reqXml = `<additional_requirements>\n${triggeredItems.join("\n")}\n</additional_requirements>`;
+        injectMessages.push(reqXml);
+      }
     }
 
     // 3. File Recommendations
@@ -270,6 +285,12 @@ function handleInit() {
     console.log("✅ Registered lifecycle hooks in: .agents/hooks.json");
   }
 
+  if (result.snippetsCreated) {
+    console.log("✅ Created initial snippets: .agents/context-flow/snippets.md (#op, #rg)");
+  } else {
+    console.log("ℹ️  Snippets file already present: .agents/context-flow/snippets.md");
+  }
+
   console.log("🚀 agy-context-flow initialized and active!");
 }
 
@@ -375,29 +396,56 @@ function handleSessions() {
 
 function handleCustomMessage(args: string[]) {
   const workspaceRoot = process.cwd();
+  const snippets = loadSnippets(workspaceRoot);
+
   if (args.length === 0) {
-    const current = loadCustomMessage(workspaceRoot);
-    if (!current) {
-      console.log("\nℹ️  No custom message configured in .agents/context-flow/custom_message.txt");
-      console.log("Usage: context-flow message \"<your custom message>\"\n");
+    if (snippets.size === 0) {
+      console.log("\nℹ️  No snippets configured in .agents/context-flow/snippets.md");
+      console.log("Usage: context-flow snippet set <tag> <content>");
+      console.log("Example: context-flow snippet set op \"你的看法是?\"\n");
       return;
     }
-    console.log("\n📝 === Active Custom Message ===");
-    console.log(current);
-    console.log("\n(Injected on every turn in PreInvocation)\n");
+    console.log(`\n📝 === Active Snippets (${snippets.size}) [.agents/context-flow/snippets.md] ===`);
+    for (const [tag, content] of snippets.entries()) {
+      console.log(`  #${tag} => "${content}"`);
+    }
+    console.log("\n(Triggered dynamically when your prompt includes #<tag>)\n");
     return;
   }
 
   if (args[0] === "clear") {
+    saveSnippets(workspaceRoot, new Map());
     saveCustomMessage(workspaceRoot, "");
-    console.log("✅ Cleared custom message (.agents/context-flow/custom_message.txt removed).");
+    console.log("✅ Cleared all snippets (.agents/context-flow/snippets.md cleared).");
     return;
   }
 
+  if (args[0] === "set" && args.length >= 3) {
+    const rawTag = args[1].replace(/^#+/, "").toLowerCase();
+    const content = args.slice(2).join(" ");
+    snippets.set(rawTag, content);
+    saveSnippets(workspaceRoot, snippets);
+    console.log(`✅ Saved snippet #${rawTag} to .agents/context-flow/snippets.md`);
+    return;
+  }
+
+  if (args[0] === "delete" && args.length >= 2) {
+    const rawTag = args[1].replace(/^#+/, "").toLowerCase();
+    if (snippets.delete(rawTag)) {
+      saveSnippets(workspaceRoot, snippets);
+      console.log(`✅ Deleted snippet #${rawTag}`);
+    } else {
+      console.log(`⚠️ Snippet #${rawTag} not found.`);
+    }
+    return;
+  }
+
+  // Fallback for simple message setting
+  const rawTag = "msg";
   const messageText = args.join(" ");
-  saveCustomMessage(workspaceRoot, messageText);
-  console.log("✅ Saved custom message to .agents/context-flow/custom_message.txt");
-  console.log(`\nActive message:\n"${messageText}"\n`);
+  snippets.set(rawTag, messageText);
+  saveSnippets(workspaceRoot, snippets);
+  console.log(`✅ Saved snippet #${rawTag}: "${messageText}" to .agents/context-flow/snippets.md`);
 }
 
 function handleConfig(args: string[]) {
@@ -493,7 +541,7 @@ async function main() {
     handleList(limit);
   } else if (command === "sessions") {
     handleSessions();
-  } else if (command === "message" || command === "custom-message") {
+  } else if (command === "message" || command === "custom-message" || command === "snippet" || command === "snippets") {
     handleCustomMessage(args.slice(1));
   } else if (command === "recommend") {
     const query = args.slice(1).join(" ");
@@ -505,7 +553,7 @@ async function main() {
   } else if (command === "config") {
     handleConfig(args.slice(1));
   } else {
-    console.log("Usage: context-flow [init | config [set <k> <v>] | message [<text>|clear] | sessions | hook <pre-invocation|post-invocation> | stats | list | recommend <query>]");
+    console.log("Usage: context-flow [init | config [set <k> <v>] | snippet [set <tag> <text>|delete <tag>|clear] | message [<text>|clear] | sessions | hook <pre-invocation|post-invocation> | stats | list | recommend <query>]");
   }
 }
 

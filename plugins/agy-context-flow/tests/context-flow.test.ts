@@ -16,6 +16,8 @@ import {
   loadLastSessionState,
   loadCustomMessage,
   saveCustomMessage,
+  loadSnippets,
+  saveSnippets,
 } from "../src/store.js";
 import { loadConfig, saveConfig, DEFAULT_CONFIG, formatConfidence, initWorkspace } from "../src/config.js";
 import { evaluateSessionContinuity } from "../src/continuity.js";
@@ -361,6 +363,13 @@ test("initWorkspace creates config and merges hooks safely preserving other plug
 
     assert.equal(result.configCreated, true);
     assert.equal(result.hooksUpdated, true);
+    assert.equal(result.snippetsCreated, true);
+
+    // Verify snippets.md exists with default #op and #rg
+    assert.ok(fs.existsSync(result.snippetsPath));
+    const snippetsContent = fs.readFileSync(result.snippetsPath, "utf8");
+    assert.ok(snippetsContent.includes("#op 你的看法是?"));
+    assert.ok(snippetsContent.includes("#rg 魯棒性和泛用性，你的看法是?"));
 
     // Verify config.json exists
     const configPath = path.join(agentsDir, "context-flow", "config.json");
@@ -500,6 +509,38 @@ test("saveCustomMessage and loadCustomMessage manage custom message persistence 
     // Clear message
     saveCustomMessage(tmpDir, "");
     assert.equal(loadCustomMessage(tmpDir), null);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test("loadSnippets and saveSnippets parse markdown headings and on-demand trigger tags", () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "agy-snippets-test-"));
+  try {
+    const agentsDir = path.join(tmpDir, ".agents", "context-flow");
+    fs.mkdirSync(agentsDir, { recursive: true });
+
+    // 1. Test single-line format: #op and #rg
+    const mdContent = `#op 你的看法是?\n#rg 魯棒性和泛用性，你的看法是?\n\n# multi\n這是多行內容第一行\n這是多行內容第二行\n`;
+    fs.writeFileSync(path.join(agentsDir, "snippets.md"), mdContent, "utf8");
+
+    const snippets = loadSnippets(tmpDir);
+    assert.equal(snippets.size, 3);
+    assert.equal(snippets.get("op"), "你的看法是?");
+    assert.equal(snippets.get("rg"), "魯棒性和泛用性，你的看法是?");
+    assert.equal(snippets.get("multi"), "這是多行內容第一行\n這是多行內容第二行");
+
+    // 2. Test saving snippets
+    snippets.set("newtag", "新規則內容");
+    saveSnippets(tmpDir, snippets);
+
+    const reloaded = loadSnippets(tmpDir);
+    assert.equal(reloaded.size, 4);
+    assert.equal(reloaded.get("newtag"), "新規則內容");
+
+    // 3. Test clear snippets
+    saveSnippets(tmpDir, new Map());
+    assert.equal(loadSnippets(tmpDir).size, 0);
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }

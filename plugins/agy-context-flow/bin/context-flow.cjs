@@ -455,11 +455,26 @@ function initWorkspace(workspaceRoot, customScriptRelPath) {
     ]
   };
   fs2.writeFileSync(hooksPath, JSON.stringify(existingHooks, null, 2), "utf8");
+  const snippetsDir = path2.join(ws, ".agents", "context-flow");
+  if (!fs2.existsSync(snippetsDir)) {
+    fs2.mkdirSync(snippetsDir, { recursive: true });
+  }
+  const snippetsPath = path2.join(snippetsDir, "snippets.md");
+  let snippetsCreated = false;
+  if (!fs2.existsSync(snippetsPath)) {
+    const defaultSnippets = `#op \u4F60\u7684\u770B\u6CD5\u662F?
+#rg \u9B6F\u68D2\u6027\u548C\u6CDB\u7528\u6027\uFF0C\u4F60\u7684\u770B\u6CD5\u662F?
+`;
+    fs2.writeFileSync(snippetsPath, defaultSnippets, "utf8");
+    snippetsCreated = true;
+  }
   return {
     configCreated: !configAlreadyExists,
     hooksUpdated: true,
+    snippetsCreated,
     hooksPath,
-    configPath
+    configPath,
+    snippetsPath
   };
 }
 
@@ -487,20 +502,66 @@ function getLastSessionPath(workspaceRoot) {
   if (!dir) return null;
   return path3.join(dir, "last_session.json");
 }
+function getSnippetsPath(workspaceRoot) {
+  const dir = getStoreDir(workspaceRoot);
+  if (!dir) return null;
+  return path3.join(dir, "snippets.md");
+}
+function loadSnippets(workspaceRoot) {
+  const snippets = /* @__PURE__ */ new Map();
+  const p = getSnippetsPath(workspaceRoot);
+  if (!p || !fs3.existsSync(p)) return snippets;
+  try {
+    const raw = fs3.readFileSync(p, "utf8");
+    const lines = raw.split(/\r?\n/);
+    let currentTag = null;
+    let currentLines = [];
+    const flush = () => {
+      if (currentTag && currentLines.length > 0) {
+        snippets.set(currentTag.toLowerCase(), currentLines.join("\n").trim());
+      }
+    };
+    for (const line of lines) {
+      const match = line.match(/^#+\s*([a-zA-Z0-9_\u4e00-\u9fa5\-]+)(?:\s+(.*))?$/);
+      if (match) {
+        flush();
+        currentTag = match[1];
+        currentLines = match[2] ? [match[2]] : [];
+      } else if (currentTag) {
+        currentLines.push(line);
+      }
+    }
+    flush();
+  } catch {
+  }
+  return snippets;
+}
+function saveSnippets(workspaceRoot, snippets) {
+  const p = getSnippetsPath(workspaceRoot);
+  if (!p) return;
+  try {
+    if (snippets.size === 0) {
+      if (fs3.existsSync(p)) fs3.unlinkSync(p);
+      return;
+    }
+    const lines = [];
+    for (const [tag, content] of snippets.entries()) {
+      if (content.includes("\n")) {
+        lines.push(`#${tag}
+${content}
+`);
+      } else {
+        lines.push(`#${tag} ${content}`);
+      }
+    }
+    fs3.writeFileSync(p, lines.join("\n").trim() + "\n", "utf8");
+  } catch {
+  }
+}
 function getCustomMessagePath(workspaceRoot) {
   const dir = getStoreDir(workspaceRoot);
   if (!dir) return null;
   return path3.join(dir, "custom_message.txt");
-}
-function loadCustomMessage(workspaceRoot) {
-  const p = getCustomMessagePath(workspaceRoot);
-  if (!p || !fs3.existsSync(p)) return null;
-  try {
-    const content = fs3.readFileSync(p, "utf8").trim();
-    return content.length > 0 ? content : null;
-  } catch {
-    return null;
-  }
 }
 function saveCustomMessage(workspaceRoot, message) {
   const p = getCustomMessagePath(workspaceRoot);
@@ -1222,12 +1283,23 @@ ${sessionLines.join("\n")}
         injectMessages.push(continuityXml);
       }
     }
-    const customMessage = loadCustomMessage(workspaceRoot);
-    if (customMessage) {
-      const customXml = `<custom_message>
-${customMessage}
-</custom_message>`;
-      injectMessages.push(customXml);
+    const snippets = loadSnippets(workspaceRoot);
+    if (snippets.size > 0 && parsed.query) {
+      const matches = Array.from(parsed.query.matchAll(/#([a-zA-Z0-9_\u4e00-\u9fa5\-]+)/g));
+      const matchedTags = Array.from(new Set(matches.map((m) => m[1].toLowerCase())));
+      const triggeredItems = [];
+      for (const tag of matchedTags) {
+        if (snippets.has(tag)) {
+          const content = snippets.get(tag);
+          triggeredItems.push(`  <item tag="#${tag}">${content}</item>`);
+        }
+      }
+      if (triggeredItems.length > 0) {
+        const reqXml = `<additional_requirements>
+${triggeredItems.join("\n")}
+</additional_requirements>`;
+        injectMessages.push(reqXml);
+      }
     }
     if (config.recommend.enabled) {
       const recommendation = recommendFiles(parsed.query, workspaceRoot, config, input.conversationId);
@@ -1342,6 +1414,11 @@ function handleInit() {
   if (result.hooksUpdated) {
     console.log("\u2705 Registered lifecycle hooks in: .agents/hooks.json");
   }
+  if (result.snippetsCreated) {
+    console.log("\u2705 Created initial snippets: .agents/context-flow/snippets.md (#op, #rg)");
+  } else {
+    console.log("\u2139\uFE0F  Snippets file already present: .agents/context-flow/snippets.md");
+  }
   console.log("\u{1F680} agy-context-flow initialized and active!");
 }
 function handleStats() {
@@ -1436,30 +1513,51 @@ function handleSessions() {
 }
 function handleCustomMessage(args) {
   const workspaceRoot = process.cwd();
+  const snippets = loadSnippets(workspaceRoot);
   if (args.length === 0) {
-    const current = loadCustomMessage(workspaceRoot);
-    if (!current) {
-      console.log("\n\u2139\uFE0F  No custom message configured in .agents/context-flow/custom_message.txt");
-      console.log('Usage: context-flow message "<your custom message>"\n');
+    if (snippets.size === 0) {
+      console.log("\n\u2139\uFE0F  No snippets configured in .agents/context-flow/snippets.md");
+      console.log("Usage: context-flow snippet set <tag> <content>");
+      console.log('Example: context-flow snippet set op "\u4F60\u7684\u770B\u6CD5\u662F?"\n');
       return;
     }
-    console.log("\n\u{1F4DD} === Active Custom Message ===");
-    console.log(current);
-    console.log("\n(Injected on every turn in PreInvocation)\n");
+    console.log(`
+\u{1F4DD} === Active Snippets (${snippets.size}) [.agents/context-flow/snippets.md] ===`);
+    for (const [tag, content] of snippets.entries()) {
+      console.log(`  #${tag} => "${content}"`);
+    }
+    console.log("\n(Triggered dynamically when your prompt includes #<tag>)\n");
     return;
   }
   if (args[0] === "clear") {
+    saveSnippets(workspaceRoot, /* @__PURE__ */ new Map());
     saveCustomMessage(workspaceRoot, "");
-    console.log("\u2705 Cleared custom message (.agents/context-flow/custom_message.txt removed).");
+    console.log("\u2705 Cleared all snippets (.agents/context-flow/snippets.md cleared).");
     return;
   }
+  if (args[0] === "set" && args.length >= 3) {
+    const rawTag2 = args[1].replace(/^#+/, "").toLowerCase();
+    const content = args.slice(2).join(" ");
+    snippets.set(rawTag2, content);
+    saveSnippets(workspaceRoot, snippets);
+    console.log(`\u2705 Saved snippet #${rawTag2} to .agents/context-flow/snippets.md`);
+    return;
+  }
+  if (args[0] === "delete" && args.length >= 2) {
+    const rawTag2 = args[1].replace(/^#+/, "").toLowerCase();
+    if (snippets.delete(rawTag2)) {
+      saveSnippets(workspaceRoot, snippets);
+      console.log(`\u2705 Deleted snippet #${rawTag2}`);
+    } else {
+      console.log(`\u26A0\uFE0F Snippet #${rawTag2} not found.`);
+    }
+    return;
+  }
+  const rawTag = "msg";
   const messageText = args.join(" ");
-  saveCustomMessage(workspaceRoot, messageText);
-  console.log("\u2705 Saved custom message to .agents/context-flow/custom_message.txt");
-  console.log(`
-Active message:
-"${messageText}"
-`);
+  snippets.set(rawTag, messageText);
+  saveSnippets(workspaceRoot, snippets);
+  console.log(`\u2705 Saved snippet #${rawTag}: "${messageText}" to .agents/context-flow/snippets.md`);
 }
 function handleConfig(args) {
   const workspaceRoot = process.cwd();
@@ -1546,7 +1644,7 @@ async function main() {
     handleList(limit);
   } else if (command === "sessions") {
     handleSessions();
-  } else if (command === "message" || command === "custom-message") {
+  } else if (command === "message" || command === "custom-message" || command === "snippet" || command === "snippets") {
     handleCustomMessage(args.slice(1));
   } else if (command === "recommend") {
     const query = args.slice(1).join(" ");
@@ -1558,7 +1656,7 @@ async function main() {
   } else if (command === "config") {
     handleConfig(args.slice(1));
   } else {
-    console.log("Usage: context-flow [init | config [set <k> <v>] | message [<text>|clear] | sessions | hook <pre-invocation|post-invocation> | stats | list | recommend <query>]");
+    console.log("Usage: context-flow [init | config [set <k> <v>] | snippet [set <tag> <text>|delete <tag>|clear] | message [<text>|clear] | sessions | hook <pre-invocation|post-invocation> | stats | list | recommend <query>]");
   }
 }
 main().catch((err) => {
