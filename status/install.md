@@ -28,7 +28,21 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\status\install.ps1
 C:\Users\<Username>\.gemini\antigravity-cli\settings.json
 ```
 
+### 推薦：Rust 原生執行檔模式（極致省記憶體，耗時 < 25ms）
+
 加入或更新：
+
+```json
+{
+  "statusLine": {
+    "type": "custom",
+    "command": "C:/Users/<Username>/.antigravity/statusline.exe",
+    "enabled": true
+  }
+}
+```
+
+### 相容：PowerShell 腳本模式
 
 ```json
 {
@@ -39,9 +53,6 @@ C:\Users\<Username>\.gemini\antigravity-cli\settings.json
   }
 }
 ```
-
-請將 `<Username>` 替換成實際 Windows 使用者名稱。若使用 Windows PowerShell，
-可以把 `pwsh` 改成 `powershell`。
 
 ## 更新
 
