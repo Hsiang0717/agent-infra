@@ -1,94 +1,61 @@
 Set-StrictMode -Version 2.0
 
-function Invoke-GitWithTimeout {
-    param(
-        [Parameter(Mandatory = $true)][string]$Path,
-        [Parameter(Mandatory = $true)][string[]]$Arguments,
-        [int]$TimeoutMs = 200
-    )
+function Find-GitDir {
+    param([Parameter(Mandatory = $true)][string]$Path)
 
-    $psi = New-Object System.Diagnostics.ProcessStartInfo
-    $psi.FileName = 'git'
-    $psi.UseShellExecute = $false
-    $psi.CreateNoWindow = $true
-    $psi.RedirectStandardOutput = $true
-    $psi.RedirectStandardError = $true
-
-    # ProcessStartInfo.ArgumentList is available in newer .NET versions.
-    # Keep a quoted fallback for Windows PowerShell 5.1 compatibility.
-    if ($psi.PSObject.Properties.Name -contains 'ArgumentList') {
-        foreach ($arg in @('-C', $Path) + $Arguments) {
-            [void]$psi.ArgumentList.Add([string]$arg)
-        }
-    } else {
-        $allArgs = @('-C', $Path) + $Arguments
-        $psi.Arguments = (($allArgs | ForEach-Object {
-            '"' + ([string]$_ -replace '(\\*)"', '$1$1\"' -replace '(\\+)$', '$1$1') + '"'
-        }) -join ' ')
-    }
-
-    $proc = New-Object System.Diagnostics.Process
-    $proc.StartInfo = $psi
-    try {
-        if (-not $proc.Start()) { return $null }
-
-        $stdoutTask = $proc.StandardOutput.ReadToEndAsync()
-        $stderrTask = $proc.StandardError.ReadToEndAsync()
-        if (-not $proc.WaitForExit($TimeoutMs)) {
-            try { $proc.Kill() } catch {}
-            return $null
-        }
-        $proc.WaitForExit()
-        if ($proc.ExitCode -ne 0) { return $null }
-        return $stdoutTask.Result
-    } catch {
-        return $null
-    } finally {
-        try { $proc.Dispose() } catch {}
-    }
-}
-
-function Get-GitStatus {
-    param(
-        [string]$Path,
-        [int]$TimeoutMs = 200
-    )
-
-    if (-not $Path -or -not (Test-Path -LiteralPath $Path -PathType Container)) {
-        return [pscustomobject]@{ Branch = ''; Dirty = $false; Available = $false }
-    }
-
-    # Fast-path: check if .git exists in $Path or any parent directory
     $current = $Path
-    $hasGit = $false
     while ($current) {
-        if (Test-Path -LiteralPath (Join-Path $current '.git')) {
-            $hasGit = $true
-            break
+        $candidate = Join-Path $current '.git'
+        if (Test-Path -LiteralPath $candidate -PathType Container) {
+            return $candidate
         }
+
+        if (Test-Path -LiteralPath $candidate -PathType Leaf) {
+            try {
+                $content = (Get-Content -LiteralPath $candidate -Raw -ErrorAction Stop).Trim()
+                if ($content -match '^gitdir:\s*(.+)$') {
+                    $gitDirTarget = $Matches[1].Trim()
+                    if (-not [System.IO.Path]::IsPathRooted($gitDirTarget)) {
+                        $gitDirTarget = [System.IO.Path]::GetFullPath((Join-Path $current $gitDirTarget))
+                    }
+                    if (Test-Path -LiteralPath $gitDirTarget -PathType Container) {
+                        return $gitDirTarget
+                    }
+                }
+            } catch {}
+        }
+
         $parent = Split-Path $current -Parent
         if (-not $parent -or $parent -eq $current) { break }
         $current = $parent
     }
-    if (-not $hasGit) {
-        return [pscustomobject]@{ Branch = ''; Dirty = $false; Available = $false }
-    }
 
-    $env:GIT_OPTIONAL_LOCKS = '0'
-    $output = Invoke-GitWithTimeout -Path $Path -Arguments @('status', '--porcelain', '--branch') -TimeoutMs $TimeoutMs
-    if (-not $output) {
-        return [pscustomobject]@{ Branch = ''; Dirty = $false; Available = $false }
-    }
-
-    $lines = @($output -split "`r?`n" | Where-Object { $_ })
-    $branch = ''
-    $dirty = $false
-    if ($lines.Count -gt 0 -and $lines[0] -match '^##\s+(.+?)(?:\.\.\S+)?(?:\s|$)') {
-        $branch = $Matches[1].Trim()
-    }
-    if ($lines.Count -gt 1) { $dirty = $true }
-
-    return [pscustomobject]@{ Branch = $branch; Dirty = $dirty; Available = $true }
+    return $null
 }
 
-Export-ModuleMember -Function Get-GitStatus
+function Get-GitBranch {
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    if (-not (Test-Path -LiteralPath $Path -PathType Container)) { return '' }
+
+    try {
+        $resolvedPath = (Resolve-Path -LiteralPath $Path -ErrorAction Stop).Path
+        $gitDir = Find-GitDir -Path $resolvedPath
+        if (-not $gitDir) { return '' }
+
+        $headFile = Join-Path $gitDir 'HEAD'
+        if (-not (Test-Path -LiteralPath $headFile -PathType Leaf)) { return '' }
+
+        $head = (Get-Content -LiteralPath $headFile -Raw -ErrorAction Stop).Trim()
+        if ($head -match '^ref:\s*refs/heads/(.+)$') {
+            return $Matches[1].Trim()
+        }
+        if ($head.Length -ge 7) {
+            return $head.Substring(0, 7)
+        }
+    } catch {}
+
+    return ''
+}
+
+Export-ModuleMember -Function Get-GitBranch

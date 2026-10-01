@@ -3,24 +3,89 @@ $ProgressPreference = 'SilentlyContinue'
 $ErrorActionPreference = 'SilentlyContinue'
 $global:LASTEXITCODE = 0
 
-try {
-    function script:Ensure-GitModule {
-        if (-not (Get-Command -Name Get-GitStatus -ErrorAction SilentlyContinue)) {
-            $modPath = Join-Path $PSScriptRoot 'Status.Git.psm1'
-            if (Test-Path -LiteralPath $modPath) {
-                Import-Module $modPath -Force -ErrorAction SilentlyContinue
+$script:LogFile = Join-Path ([System.IO.Path]::GetTempPath()) "antigravity-statusline.log"
+function script:Write-StatusLog([string]$message, [object]$errorObj = $null) {
+    try {
+        $timestamp = (Get-Date).ToString("yyyy-MM-dd HH:mm:ss.fff")
+        $logLine = "[$timestamp] [PID $PID] $message"
+        if ($errorObj) {
+            $logLine += " | Exception: $($errorObj.ToString())"
+            if ($errorObj.InvocationInfo) {
+                $logLine += " at line $($errorObj.InvocationInfo.ScriptLineNumber)"
             }
+        }
+        if (Test-Path -LiteralPath $script:LogFile) {
+            $f = Get-Item -LiteralPath $script:LogFile -ErrorAction SilentlyContinue
+            if ($f -and $f.Length -gt 262144) {
+                Clear-Content -LiteralPath $script:LogFile -Force -ErrorAction SilentlyContinue
+            }
+        }
+        [System.IO.File]::AppendAllText($script:LogFile, "$logLine`r`n", [System.Text.Encoding]::UTF8)
+    } catch {}
+}
+
+try {
+    function script:Find-GitDir([string]$Path) {
+        $current = $Path
+        while ($current) {
+            $candidate = Join-Path $current '.git'
+            if (Test-Path -LiteralPath $candidate -PathType Container) { return $candidate }
+            if (Test-Path -LiteralPath $candidate -PathType Leaf) {
+                try {
+                    $content = (Get-Content -LiteralPath $candidate -Raw -ErrorAction Stop).Trim()
+                    if ($content -match '^gitdir:\s*(.+)$') {
+                        $gitDirTarget = $Matches[1].Trim()
+                        if (-not [System.IO.Path]::IsPathRooted($gitDirTarget)) {
+                            $gitDirTarget = [System.IO.Path]::GetFullPath((Join-Path $current $gitDirTarget))
+                        }
+                        if (Test-Path -LiteralPath $gitDirTarget -PathType Container) { return $gitDirTarget }
+                    }
+                } catch {}
+            }
+            $parent = Split-Path $current -Parent
+            if (-not $parent -or $parent -eq $current) { break }
+            $current = $parent
+        }
+        return $null
+    }
+
+    function script:Get-GitBranch([string]$Path) {
+        if (-not (Test-Path -LiteralPath $Path -PathType Container)) { return '' }
+        try {
+            $resolvedPath = (Resolve-Path -LiteralPath $Path -ErrorAction Stop).Path
+            $gitDir = Find-GitDir -Path $resolvedPath
+            if (-not $gitDir) { return '' }
+            $headFile = Join-Path $gitDir 'HEAD'
+            if (-not (Test-Path -LiteralPath $headFile -PathType Leaf)) { return '' }
+            $head = (Get-Content -LiteralPath $headFile -Raw -ErrorAction Stop).Trim()
+            if ($head -match '^ref:\s*refs/heads/(.+)$') { return $Matches[1].Trim() }
+            if ($head.Length -ge 7) { return $head.Substring(0, 7) }
+        } catch {}
+        return ''
+    }
+
+    function script:Get-PowerStatus {
+        if ($env:ANTIGRAVITY_STATUS_NO_POWER -eq '1') { return $null }
+        if ($env:OS -notlike '*Windows*' -and -not $env:COMPUTERNAME) { return $null }
+        try {
+            if (-not ('System.Windows.Forms.SystemInformation' -as [type])) {
+                [void][System.Reflection.Assembly]::LoadWithPartialName('System.Windows.Forms')
+            }
+            $status = [System.Windows.Forms.SystemInformation]::PowerStatus
+            if (-not $status) { return $null }
+            $pct = [int][Math]::Round((100 * [double]$status.BatteryLifePercent))
+            $pct = [Math]::Max(0, [Math]::Min(100, $pct))
+            return [pscustomobject]@{
+                Percent = $pct
+                LineStatus = [string]$status.PowerLineStatus
+            }
+        } catch {
+            return $null
         }
     }
 
-    function script:Ensure-PowerModule {
-        if (-not (Get-Command -Name Get-PowerStatus -ErrorAction SilentlyContinue)) {
-            $modPath = Join-Path $PSScriptRoot 'Status.Power.psm1'
-            if (Test-Path -LiteralPath $modPath) {
-                Import-Module $modPath -Force -ErrorAction SilentlyContinue
-            }
-        }
-    }
+    function script:Ensure-GitModule { }
+    function script:Ensure-PowerModule { }
 
     $SHOW_LEGEND = $args | Where-Object { $_ -in @('--legend', '-l', 'legend') }
     if ($SHOW_LEGEND) {
@@ -37,30 +102,54 @@ try {
     # Set Output Encoding to UTF-8 to support nerd font icons on Windows
     try { [Console]::OutputEncoding = [System.Text.Encoding]::UTF8 } catch {}
 
-
-
-    # Read JSON input from stdin or pipeline safely
+    # Read JSON input from stdin safely without blocking or pipeline deadlocks
     $inputJson = ""
-    try {
-        $pipelineStr = $input | Out-String
-        if ($pipelineStr -and $pipelineStr.Trim().Length -gt 0) {
-            $inputJson = $pipelineStr
-        }
-    } catch {}
-    if (-not $inputJson -or $inputJson.Trim().Length -eq 0) {
+    $nativeDll = Join-Path $PSScriptRoot 'Status.Native.dll'
+    $hasNative = $false
+    if (Test-Path -LiteralPath $nativeDll) {
         try {
-            if ([Console]::IsInputRedirected) {
-                $inputJson = [Console]::In.ReadToEnd()
-            }
+            $bytes = [System.IO.File]::ReadAllBytes($nativeDll)
+            [void][System.Reflection.Assembly]::Load($bytes)
+            $hasNative = (('StatusPipe' -as [type]) -ne $null)
         } catch {}
+    }
+
+    if ($hasNative) {
+        $avail = 0
+        for ($i = 0; $i -lt 15; $i++) {
+            $avail = [StatusPipe]::GetAvailableBytes()
+            if ($avail -gt 0) { break }
+            Start-Sleep -Milliseconds 10
+        }
+        if ($avail -gt 0) {
+            try {
+                $inputJson = [Console]::In.ReadToEnd()
+            } catch {
+                Write-StatusLog "Failed reading from pipe with bytes available" $_
+            }
+        }
+    } elseif ([Console]::IsInputRedirected) {
+        try {
+            $readTask = [Console]::In.ReadToEndAsync()
+            if ($readTask.Wait(150)) {
+                $inputJson = $readTask.Result
+            } else {
+                Write-StatusLog "Stdin read timed out after 150ms (no payload provided)"
+            }
+        } catch {
+            Write-StatusLog "Stdin read error" $_
+        }
     }
 
     # Parse JSON safely, create empty object fallback if input is null/empty
     $data = $null
     if ($inputJson -and $inputJson.Trim().Length -gt 0) {
         try {
-            $data = ConvertFrom-Json $inputJson
-        } catch {}
+            $cleaned = $inputJson.Trim().Trim([char]0xFEFF)
+            $data = ConvertFrom-Json $cleaned
+        } catch {
+            Write-StatusLog "Failed parsing JSON input" $_
+        }
     }
     if ($data -eq $null) {
         $data = [PSCustomObject]@{
@@ -121,8 +210,7 @@ if ($data -and $data.context_window -and $data.context_window.used_percentage -n
 }
 $USED_PCT = Clamp-Double (Safe-Double $usedPctVal 0.0) 0 100
 
-$VCS_BRANCH = if ($data -and $data.vcs -and $data.vcs.branch) { Clean-DisplayText $data.vcs.branch 80 } else { "" }
-$VCS_DIRTY = if ($data -and $data.vcs -and $data.vcs.dirty -ne $null) { Safe-Bool $data.vcs.dirty } else { $false }
+$VCS_BRANCH = ""
 $SANDBOX = if ($data -and $data.sandbox -and $data.sandbox.enabled -ne $null) { Safe-Bool $data.sandbox.enabled } else { $false }
 $SANDBOX_NET = if ($data -and $data.sandbox -and $data.sandbox.allow_network -ne $null) { Safe-Bool $data.sandbox.allow_network } else { $false }
 $ARTIFACTS = if ($data -and $data.artifact_count -ne $null) { [Math]::Max(0, [int](Safe-Double $data.artifact_count 0)) } else { 0 }
@@ -130,35 +218,19 @@ $SUBAGENTS = if ($data -and $data.subagents -and $data.subagents.GetType().IsArr
 $BG_TASKS = if ($data -and $data.task_count -ne $null) { [Math]::Max(0, [int](Safe-Double $data.task_count 0)) } else { 0 }
 $MODEL_ID = if ($data -and $data.model -and $data.model.id) { Clean-DisplayText $data.model.id 80 } else { "" }
 $MODEL_NAME = if ($data -and $data.model -and $data.model.display_name) { Clean-DisplayText $data.model.display_name 80 } else { "" }
+$MODEL_EFFORT = if ($data -and $data.model -and $data.model.effort) { Clean-DisplayText $data.model.effort 16 } else { "" }
+if ($MODEL_EFFORT) {
+    $MODEL_EFFORT = $MODEL_EFFORT.Substring(0, 1).ToUpperInvariant() + $MODEL_EFFORT.Substring(1).ToLowerInvariant()
+}
 $COLS = if ($data -and $data.terminal_width -ne $null) { [int](Clamp-Double (Safe-Double $data.terminal_width 80) 20 400) } else { 80 }
 $CWD = if ($data -and $data.cwd) { Clean-DisplayText $data.cwd 260 } else { "" }
-$CONV_ID = if ($data -and $data.conversation_id) { Clean-DisplayText $data.conversation_id 80 } else { "" }
-$CLI_VERSION = if ($data -and $data.version) { Clean-DisplayText $data.version 32 } else { "" }
 $PLAN_TIER = if ($data -and $data.plan_tier) { Clean-DisplayText $data.plan_tier 32 } else { "" }
 $USER_EMAIL = if ($data -and $data.email) { Clean-DisplayText $data.email 120 } else { "" }
 
-$TURN_INPUT_TOKENS = 0
-if ($data -and $data.context_window -and $data.context_window.current_usage -and $data.context_window.current_usage.input_tokens -ne $null) {
-    $TURN_INPUT_TOKENS = [Math]::Max(0, [int](Safe-Double $data.context_window.current_usage.input_tokens 0))
-}
-$TURN_OUTPUT_TOKENS = 0
-if ($data -and $data.context_window -and $data.context_window.current_usage -and $data.context_window.current_usage.output_tokens -ne $null) {
-    $TURN_OUTPUT_TOKENS = [Math]::Max(0, [int](Safe-Double $data.context_window.current_usage.output_tokens 0))
-}
-
-$INPUT_TOKENS = 0
-if ($data -and $data.context_window -and $data.context_window.total_input_tokens -ne $null) {
-    $INPUT_TOKENS = [Math]::Max(0, [int](Safe-Double $data.context_window.total_input_tokens 0))
-}
-$OUTPUT_TOKENS = 0
-if ($data -and $data.context_window -and $data.context_window.total_output_tokens -ne $null) {
-    $OUTPUT_TOKENS = [Math]::Max(0, [int](Safe-Double $data.context_window.total_output_tokens 0))
-}
 $CTX_LIMIT = 0
 if ($data -and $data.context_window -and $data.context_window.context_window_size -ne $null) {
     $CTX_LIMIT = [Math]::Max(0, [int](Safe-Double $data.context_window.context_window_size 0))
 }
-$CTX_USED = $INPUT_TOKENS + $OUTPUT_TOKENS
 
 # Quotas
 $GEMINI_5H = Safe-Quota $data.quota.'gemini-5h'
@@ -210,17 +282,11 @@ $FG_BRIGHT_CYAN = $FG_MUTED_CYAN
 
 $NUM_COLOR = "${FG_BRIGHT_WHITE}${B}"
 
-# VCS: Only query git directly if JSON payload didn't provide branch info
-if (-not $VCS_BRANCH) {
-    Ensure-GitModule
-    if (Get-Command -Name Get-GitStatus -ErrorAction SilentlyContinue) {
-        $GIT_DIR = if ($CWD) { $CWD.TrimEnd('\', '/') } else { "." }
-        $gitInfo = Get-GitStatus -Path $GIT_DIR -TimeoutMs 200
-        if ($gitInfo.Available) {
-            $VCS_BRANCH = $gitInfo.Branch
-            $VCS_DIRTY = $gitInfo.Dirty
-        }
-    }
+# Read only the current branch from the project metadata; never launch git.exe.
+Ensure-GitModule
+if (Get-Command -Name Get-GitBranch -ErrorAction SilentlyContinue) {
+    $GIT_DIR = if ($CWD) { $CWD.TrimEnd('\', '/') } else { "." }
+    $VCS_BRANCH = Get-GitBranch -Path $GIT_DIR
 }
 
 # Format percentages
@@ -241,42 +307,9 @@ function human_format($num) {
     return $num.ToString()
 }
 
-$INPUT_TOK_FMT = human_format $INPUT_TOKENS
-$OUTPUT_TOK_FMT = human_format $OUTPUT_TOKENS
 $CTX_LIMIT_FMT = human_format $CTX_LIMIT
-$CTX_USED_FMT = human_format $CTX_USED
-$TURN_INPUT_FMT = human_format $TURN_INPUT_TOKENS
-$TURN_OUTPUT_FMT = human_format $TURN_OUTPUT_TOKENS
-
-function shorten_path($path, $max_len = 25) {
-    if (-not $path) { return "" }
-    try {
-        $path = [string]$path
-        $homeDir = if ($env:USERPROFILE) { $env:USERPROFILE } else { $env:HOME }
-        if ($homeDir -and $path.StartsWith($homeDir)) {
-            $path = "~" + $path.Substring($homeDir.Length)
-        }
-        if ($path.Length -gt $max_len) {
-            $leaf = ""
-            try {
-                $leaf = Split-Path $path -Leaf -ErrorAction Stop
-            } catch {
-                $parts = $path.Split([char[]]@('\', '/'))
-                $leaf = $parts[-1]
-            }
-            if ($leaf.Length -gt ($max_len - 3)) {
-                $slice_len = $max_len - 3
-                if ($slice_len -lt 1) { $slice_len = 1 }
-                $startIdx = [Math]::Max(0, $leaf.Length - $slice_len)
-                return "..." + (Safe-Substring $leaf $startIdx $slice_len)
-            }
-            return "..." + $leaf
-        }
-        return $path
-    } catch {
-        return ""
-    }
-}
+$CTX_USED_EST = [Math]::Round($CTX_LIMIT * $USED_PCT / 100.0)
+$CTX_USED_FMT = human_format $CTX_USED_EST
 
 function Safe-Substring([string]$str, [int]$startIndex, [int]$length) {
     if (-not $str) { return "" }
@@ -297,33 +330,23 @@ function Truncate-String($str, $maxLen) {
 }
 
 # Dynamic limits based on terminal width ($COLS)
-$max_path_len = 25
 $max_user_len = 35
-$max_host_len = 30
 $max_model_len = 35
 $max_branch_len = 30
 
 if ($COLS -lt 65) {
-    $max_path_len = 10
     $max_user_len = 12
-    $max_host_len = 10
     $max_model_len = 14
     $max_branch_len = 14
 } elseif ($COLS -lt 85) {
-    $max_path_len = 16
     $max_user_len = 18
-    $max_host_len = 14
     $max_model_len = 20
     $max_branch_len = 20
 } elseif ($COLS -lt 110) {
-    $max_path_len = 20
     $max_user_len = 24
-    $max_host_len = 18
     $max_model_len = 28
     $max_branch_len = 25
 }
-
-$CWD_SHORT = shorten_path $CWD $max_path_len
 
 # ─── Parse CLI Arguments & Theme ─────────────────────────────────────────────
 $USE_CLASSIC_ICONS = $false
@@ -353,9 +376,6 @@ if ($USE_CLASSIC_ICONS) {
     $ICON_ARTIFACTS = "artifacts"
     $ICON_SUBAGENTS = "subagents"
     $ICON_TASKS = "tasks"
-    $ICON_DIR = "╱"
-    $ICON_CONV = "╱"
-    $ICON_TOK_SUM = ""
     $ICON_RESET = "~"
     $ICON_AC = "AC"
     $ICON_BAT = "BAT"
@@ -376,9 +396,6 @@ if ($USE_CLASSIC_ICONS) {
     $ICON_ARTIFACTS = ""
     $ICON_SUBAGENTS = "󱙺"
     $ICON_TASKS = ""
-    $ICON_DIR = ""
-    $ICON_CONV = "󰍪"
-    $ICON_TOK_SUM = ""
     $ICON_RESET = "󰔟"
     $ICON_AC = "󰚥"
     $ICON_BAT = "🔋"
@@ -431,11 +448,6 @@ function visible_len($str) {
     return $len
 }
 
-$CLI_VER_FMT = ""
-if ($CLI_VERSION) {
-    $CLI_VER_FMT = "${DOT_L1}${FG_GRAY}v${CLI_VERSION}${R}"
-}
-
 $USER_FMT = ""
 if ($PLAN_TIER -or $USER_EMAIL) {
     $userInfo = ""
@@ -452,21 +464,6 @@ if ($PLAN_TIER -or $USER_EMAIL) {
         $USER_FMT = "${DOT_L1}${FG_GRAY}${userInfo}${R}"
     } else {
         $USER_FMT = "${DOT_L1}${FG_GRAY}󰇮 ${userInfo}${R}"
-    }
-}
-
-# Get hostname
-$HOST_NAME = ""
-try { $HOST_NAME = [System.Net.Dns]::GetHostName() } catch {}
-$HOST_NAME = if ($env:COMPUTERNAME) { $env:COMPUTERNAME } else { $HOST_NAME }
-
-$HOST_FMT = ""
-if ($HOST_NAME) {
-    $hostDetails = Truncate-String $HOST_NAME $max_host_len
-    if ($USE_CLASSIC_ICONS) {
-        $HOST_FMT = "${DOT_L1}${FG_BRIGHT_BLUE}${hostDetails}${R}"
-    } else {
-        $HOST_FMT = "${DOT_L1}${FG_BRIGHT_BLUE}󰒋 ${hostDetails}${R}"
     }
 }
 
@@ -510,24 +507,26 @@ switch ($STATE) {
 $V = ""
 if ($VCS_BRANCH) {
     $vcsDisp = Truncate-String $VCS_BRANCH $max_branch_len
-    if ($VCS_DIRTY -eq $true) {
-        if ($USE_CLASSIC_ICONS) {
-            $V = "${DOT_L1}${FG_BRIGHT_RED}${vcsDisp}${FG_BRIGHT_YELLOW}*${R}"
-        } else {
-            $V = "${DOT_L1}${R}${FG_BRIGHT_RED}${ICON_VCS} ${vcsDisp}${FG_BRIGHT_YELLOW}*${R}"
-        }
+    if ($USE_CLASSIC_ICONS) {
+        $V = "${DOT_L1}${FG_BRIGHT_BLUE}${vcsDisp}${R}"
     } else {
-        if ($USE_CLASSIC_ICONS) {
-            $V = "${DOT_L1}${FG_BRIGHT_BLUE}${vcsDisp}${R}"
-        } else {
-            $V = "${DOT_L1}${R}${FG_BRIGHT_BLUE}${ICON_VCS} ${vcsDisp}${R}"
-        }
+        $V = "${DOT_L1}${R}${FG_BRIGHT_BLUE}${ICON_VCS} ${vcsDisp}${R}"
     }
 }
 
 # Model details
 $disp = if ($MODEL_NAME) { $MODEL_NAME } else { $MODEL_ID }
-$disp = Truncate-String $disp $max_model_len
+$effortAlreadyShown = $false
+if ($MODEL_EFFORT -and $disp) {
+    $effortPattern = '\s*\(' + [regex]::Escape($MODEL_EFFORT) + '\)\s*$'
+    $effortAlreadyShown = [regex]::IsMatch($disp, $effortPattern, [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)
+}
+if ($effortAlreadyShown) {
+    $disp = Truncate-String $disp $max_model_len
+} else {
+    $effortSuffix = if ($MODEL_EFFORT) { " ($MODEL_EFFORT)" } else { "" }
+    $disp = (Truncate-String $disp ([Math]::Max(1, $max_model_len - $effortSuffix.Length))) + $effortSuffix
+}
 $M = ""
 if ($disp) {
     if ($USE_CLASSIC_ICONS) {
@@ -612,38 +611,7 @@ if ($USE_CLASSIC_ICONS) {
     $BG_FMT = "${FG_MAGENTA}${ICON_TASKS} ${NUM_COLOR}${BG_TASKS}${R}"
 }
 
-$CONV_FMT = ""
-if ($CONV_ID) {
-    $short_conv = Safe-Substring $CONV_ID 0 8
-    if ($USE_CLASSIC_ICONS) {
-        $CONV_FMT = "${DOT_L1}${FG_GRAY}${short_conv}${R}"
-    } else {
-        $CONV_FMT = "${DOT_L1}${FG_GRAY}${ICON_CONV} ${short_conv}${R}"
-    }
-}
-
-$TOK_DETAILS_WIDE = ""
-if ($CTX_USED -gt 0 -or $CTX_LIMIT -gt 0) {
-    if ($COLS -ge 95) {
-        $turnStr = ""
-        if ($TURN_INPUT_TOKENS -gt 0 -or $TURN_OUTPUT_TOKENS -gt 0) {
-            $turnStr = " ${FG_GRAY}| turn:${R} ${FG_SAGE}+${TURN_INPUT_FMT}${R}/${FG_DUSTY_ROSE}${TURN_OUTPUT_FMT}${R}"
-        }
-        if ($USE_CLASSIC_ICONS) {
-            $TOK_DETAILS_WIDE = "(${CTX_USED_FMT}/${CTX_LIMIT_FMT}) ${DOT_L2}total: ${NUM_COLOR}${INPUT_TOK_FMT}${R}/${NUM_COLOR}${OUTPUT_TOK_FMT}${R}${turnStr}"
-        } else {
-            $TOK_DETAILS_WIDE = "(${CTX_USED_FMT}/${CTX_LIMIT_FMT}) ${DOT_L2}${FG_YELLOW}${ICON_TOK_SUM}${R} total: ${NUM_COLOR}${INPUT_TOK_FMT}${R}/${NUM_COLOR}${OUTPUT_TOK_FMT}${R}${turnStr}"
-        }
-    } elseif ($COLS -ge 75) {
-        if ($USE_CLASSIC_ICONS) {
-            $TOK_DETAILS_WIDE = "(${CTX_USED_FMT}/${CTX_LIMIT_FMT})"
-        } else {
-            $TOK_DETAILS_WIDE = "${FG_YELLOW}${ICON_TOK_SUM}${R} (${CTX_USED_FMT}/${CTX_LIMIT_FMT})"
-        }
-    } else {
-        $TOK_DETAILS_WIDE = ""
-    }
-}
+$TOK_DETAILS_WIDE = if ($CTX_LIMIT -gt 0) { "${FG_GRAY}~${NUM_COLOR}${CTX_USED_FMT} / ${CTX_LIMIT_FMT} tokens${R}" } else { "" }
 
 # Quota bars
 function format_reset_time($sec, [bool]$compact = $false) {
@@ -939,15 +907,10 @@ function Format-BoxLine($left, $right, $total_width) {
     return $lines -join "`n"
 }
 
-$DIR_FMT = if ($CWD_SHORT -and $COLS -ge 65) {
-    if ($USE_CLASSIC_ICONS) { "${FG_MUTED_CYAN}${CWD_SHORT}${R}" }
-    else { "${FG_MUTED_CYAN}${ICON_DIR} ${CWD_SHORT}${R}" }
-} else { "" }
-
 # 3-Row Clean Dashboard Layout
-# Row 1: Core Agent Identity, Model, Git branch (Left) | Working Directory (Right)
+# Row 1: Agent state, model, branch (Left) | Plan and account (Right)
 $L1_LEFT = @($S, $M, $V)
-$L1_RIGHT = @($DIR_FMT)
+$L1_RIGHT = @($USER_FMT)
 
 # Row 2: Context Window usage bar (Left) | Token Usage Metrics (Right)
 $L2_LEFT = @($CTX_BAR)
@@ -974,8 +937,9 @@ $out4 = Format-BoxLine $L3_LEFT $L3_RIGHT $width
 $out5 = $bottom_border
 Write-Output "${out1}`n${out2}`n${out3}`n${out4}`n${out5}"
 $global:LASTEXITCODE = 0
-exit 0
 } catch {
+    Write-StatusLog "Fatal error in statusline execution" $_
     $global:LASTEXITCODE = 0
     exit 0
 }
+
