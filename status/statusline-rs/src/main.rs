@@ -247,19 +247,50 @@ fn human_format(num: u64) -> String {
     num.to_string()
 }
 
-fn format_reset_time(seconds: i64) -> String {
+fn format_reset_time(seconds: i64, compact: bool) -> String {
     if seconds <= 0 {
         return String::new();
     }
-    let d = seconds / 86400;
-    let h = (seconds % 86400) / 3600;
-    let m = (seconds % 3600) / 60;
-    if d > 0 {
-        format!("{}d", d)
-    } else if h > 0 {
-        format!("{}h", h)
+    let days = seconds / 86400;
+    let rem = seconds % 86400;
+    let hours = rem / 3600;
+    let rem = rem % 3600;
+    let mins = rem / 60;
+
+    if compact {
+        if days > 0 {
+            if hours > 0 {
+                return format!("{}d{}h", days, hours);
+            }
+            return format!("{}d", days);
+        }
+        if hours > 0 {
+            if mins > 0 {
+                return format!("{}h{}m", hours, mins);
+            }
+            return format!("{}h", hours);
+        }
+        if mins > 0 {
+            return format!("{}m", mins);
+        }
+        "<1m".to_string()
     } else {
-        format!("{}m", m.max(1))
+        if days > 0 {
+            if hours > 0 {
+                return format!("{}d {}h", days, hours);
+            }
+            return format!("{}d", days);
+        }
+        if hours > 0 {
+            if mins > 0 {
+                return format!("{}h {}m", hours, mins);
+            }
+            return format!("{}h", hours);
+        }
+        if mins > 0 {
+            return format!("{}m", mins);
+        }
+        "<1m".to_string()
     }
 }
 
@@ -313,10 +344,11 @@ fn visible_len(s: &str) -> usize {
 }
 
 fn strip_separator(s: &str) -> String {
-    // Strip leading ANSI sequences and separator character (| or / or .)
     let chars: Vec<char> = s.chars().collect();
     let mut i = 0;
     let mut in_esc = false;
+
+    // Phase 1: skip leading whitespace and ANSI sequences before separator
     while i < chars.len() {
         let c = chars[i];
         if c == '\x1b' {
@@ -335,17 +367,68 @@ fn strip_separator(s: &str) -> String {
             i += 1;
             continue;
         }
-        if c == '|' || c == '/' || c == '·' || c == '╱' {
-            i += 1;
-            break;
-        }
         break;
     }
 
-    chars[i..].iter().collect()
+    // Phase 2: check if current char is a separator char
+    if i < chars.len() && (chars[i] == '|' || chars[i] == '/' || chars[i] == '·' || chars[i] == '╱') {
+        i += 1;
+
+        // Phase 3: skip trailing whitespace and ANSI sequences after separator
+        in_esc = false;
+        while i < chars.len() {
+            let c = chars[i];
+            if c == '\x1b' {
+                in_esc = true;
+                i += 1;
+                continue;
+            }
+            if in_esc {
+                if c == 'm' {
+                    in_esc = false;
+                }
+                i += 1;
+                continue;
+            }
+            if c.is_whitespace() {
+                i += 1;
+                continue;
+            }
+            break;
+        }
+        return chars[i..].iter().collect();
+    }
+
+    s.to_string()
 }
 
-fn format_flex_wrap_line(left_items: &[String], right_items: &[String], total_width: usize) -> Vec<String> {
+fn has_separator(s: &str) -> bool {
+    let mut in_esc = false;
+    for c in s.chars() {
+        if c == '\x1b' {
+            in_esc = true;
+            continue;
+        }
+        if in_esc {
+            if c == 'm' {
+                in_esc = false;
+            }
+            continue;
+        }
+        if c.is_whitespace() {
+            continue;
+        }
+        return c == '|' || c == '/' || c == '·' || c == '╱';
+    }
+    false
+}
+
+fn format_flex_wrap_line(
+    left_items: &[String],
+    right_items: &[String],
+    total_width: usize,
+    dot_sep: &str,
+) -> Vec<String> {
     let max_content = total_width.saturating_sub(4).max(1);
 
     let mut left_str = String::new();
@@ -370,8 +453,9 @@ fn format_flex_wrap_line(left_items: &[String], right_items: &[String], total_wi
 
     let left_vis = visible_len(&left_str);
     let right_vis = visible_len(&right_str);
+    let min_gap = if !left_str.is_empty() && !right_str.is_empty() { 1 } else { 0 };
 
-    if left_vis + right_vis + 1 <= max_content {
+    if left_vis + right_vis + min_gap <= max_content {
         let pad = max_content.saturating_sub(left_vis + right_vis);
         let spaces = " ".repeat(pad);
         return vec![format!(
@@ -380,28 +464,24 @@ fn format_flex_wrap_line(left_items: &[String], right_items: &[String], total_wi
         )];
     }
 
-    // Wrap mode
+    // Wrap mode: flatten items into a single sequential flow
     let mut all_items = Vec::new();
-    let mut is_first_left = true;
     for item in left_items {
         if !item.is_empty() && visible_len(item) > 0 {
-            if is_first_left {
-                all_items.push(strip_separator(item));
-                is_first_left = false;
-            } else {
-                all_items.push(item.clone());
-            }
+            all_items.push(item.clone());
         }
     }
     let mut is_first_right = true;
     for item in right_items {
         if !item.is_empty() && visible_len(item) > 0 {
+            let mut proc = item.clone();
             if is_first_right {
-                all_items.push(strip_separator(item));
+                if !has_separator(&proc) {
+                    proc = format!("{}{}", dot_sep, proc);
+                }
                 is_first_right = false;
-            } else {
-                all_items.push(item.clone());
             }
+            all_items.push(proc);
         }
     }
 
@@ -411,8 +491,13 @@ fn format_flex_wrap_line(left_items: &[String], right_items: &[String], total_wi
 
     for item in all_items {
         let is_first = cur_items.is_empty();
-        let proc_item = if is_first { strip_separator(&item) } else { item };
-        let item_vis = visible_len(&proc_item);
+        let mut proc_item = if is_first { strip_separator(&item) } else { item };
+        let mut item_vis = visible_len(&proc_item);
+
+        if item_vis > max_content {
+            proc_item = truncate_string(&proc_item, max_content);
+            item_vis = visible_len(&proc_item);
+        }
 
         if cur_vis + item_vis <= max_content {
             cur_items.push(proc_item);
@@ -427,8 +512,13 @@ fn format_flex_wrap_line(left_items: &[String], right_items: &[String], total_wi
                     FG_GRAY, R, line_content, spaces, FG_GRAY, R
                 ));
             }
-            let stripped = strip_separator(&proc_item);
-            cur_vis = visible_len(&stripped);
+            let mut stripped = strip_separator(&proc_item);
+            let mut stripped_vis = visible_len(&stripped);
+            if stripped_vis > max_content {
+                stripped = truncate_string(&stripped, max_content);
+                stripped_vis = visible_len(&stripped);
+            }
+            cur_vis = stripped_vis;
             cur_items = vec![stripped];
         }
     }
@@ -501,7 +591,15 @@ fn build_context_bar(used_pct: f64, classic: bool) -> String {
     }
 }
 
-fn build_quota_bar(val: f64, label: &str, bar_color: &str, reset_sec: i64, classic: bool) -> String {
+fn build_quota_bar(
+    val: f64,
+    label: &str,
+    bar_color: &str,
+    reset_sec: i64,
+    target_bar_len: usize,
+    compact: bool,
+    classic: bool,
+) -> String {
     let sep = if classic {
         format!("{} · {}", FG_GRAY, R)
     } else {
@@ -509,7 +607,18 @@ fn build_quota_bar(val: f64, label: &str, bar_color: &str, reset_sec: i64, class
     };
 
     if val < 0.0 {
-        return format!("{}{}{}{}: --", sep, bar_color, label, R);
+        let mut bar = String::new();
+        for _ in 0..target_bar_len {
+            if classic {
+                bar.push('·');
+            } else {
+                bar.push('░');
+            }
+        }
+        return format!(
+            "{}{}{}{}{} {}{}{} N/A{}",
+            sep, FG_BRIGHT_WHITE, B, label, R, FG_GRAY, bar, R, R
+        );
     }
 
     let val_int = val.floor() as usize;
@@ -521,23 +630,30 @@ fn build_quota_bar(val: f64, label: &str, bar_color: &str, reset_sec: i64, class
         FG_SAGE
     };
 
-    let bar_len = 8;
-    let filled = (val_int * bar_len) / 100;
-    let remainder = (val_int * bar_len) % 100;
+    let filled = (val_int * target_bar_len) / 100;
+    let remainder = (val_int * target_bar_len) % 100;
 
     let mut bar = String::new();
     if classic {
-        for i in 0..bar_len {
+        for i in 0..target_bar_len {
             if i < filled {
-                bar.push('#');
-            } else if i == filled && remainder >= 50 {
-                bar.push('+');
+                bar.push('█');
+            } else if i == filled {
+                if remainder >= 75 {
+                    bar.push('▓');
+                } else if remainder >= 50 {
+                    bar.push('▒');
+                } else if remainder >= 25 {
+                    bar.push('░');
+                } else {
+                    bar.push('·');
+                }
             } else {
-                bar.push('-');
+                bar.push('·');
             }
         }
     } else {
-        for i in 0..bar_len {
+        for i in 0..target_bar_len {
             if i < filled {
                 bar.push_str(&format!("{}█{}", bar_color, R));
             } else if i == filled {
@@ -556,22 +672,38 @@ fn build_quota_bar(val: f64, label: &str, bar_color: &str, reset_sec: i64, class
         }
     }
 
+    let val_fmt = if compact {
+        format!("{}", val_int)
+    } else {
+        format!("{:.1}", val)
+    };
+
     let reset_str = if reset_sec > 0 {
-        let icon_reset = if classic { "~" } else { "󰔟" };
-        format!(" {}{}{}", icon_reset, format_reset_time(reset_sec), R)
+        let t = format_reset_time(reset_sec, compact);
+        if !t.is_empty() {
+            if classic {
+                format!(" ~{}", t)
+            } else if compact {
+                format!(" 󰔟{}", t)
+            } else {
+                format!(" 󰔟 {}", t)
+            }
+        } else {
+            String::new()
+        }
     } else {
         String::new()
     };
 
     if classic {
         format!(
-            "{}{}{}{} [{}{}{}] {}{}%{}{}",
-            sep, bar_color, label, R, bar_color, bar, R, text_color, val_int, R, reset_str
+            "{}{}{}{}{} {}{}{} {}{}%{}{}",
+            sep, FG_BRIGHT_WHITE, B, label, R, bar_color, bar, R, text_color, val_fmt, R, reset_str
         )
     } else {
         format!(
-            "{}{}{}{} {}{}{} {}{}%{}{}",
-            sep, bar_color, label, R, bar, R, FG_GRAY, text_color, val_int, R, reset_str
+            "{}{}{}{}{} {} {}{}%{}{}",
+            sep, FG_BRIGHT_WHITE, B, label, R, bar, text_color, val_fmt, R, reset_str
         )
     }
 }
@@ -625,7 +757,17 @@ fn main() {
     };
 
     let cols = payload.terminal_width.unwrap_or(80).clamp(20, 400) as usize;
-    let width = cols.min(100);
+    let width = cols;
+
+    let (max_user_len, max_model_len, max_branch_len): (usize, usize, usize) = if cols < 65 {
+        (12, 14, 14)
+    } else if cols < 85 {
+        (18, 20, 20)
+    } else if cols < 110 {
+        (24, 28, 25)
+    } else {
+        (35, 35, 30)
+    };
 
     // State
     let raw_state = payload.agent_state.as_deref().unwrap_or("idle");
@@ -649,10 +791,13 @@ fn main() {
     let cwd = payload.cwd.as_deref().unwrap_or("");
     let branch = get_git_branch(cwd);
     let vcs_fmt = if !branch.is_empty() {
-        let max_b = if cols < 65 { 14 } else if cols < 85 { 20 } else { 25 };
-        let trunc_b = truncate_string(&branch, max_b);
-        let icon_vcs = if use_classic { "╱" } else { "" };
-        format!("{}{}{}{} {}{}", dot_l1, FG_MUTED_CYAN, icon_vcs, R, trunc_b, R)
+        let trunc_b = truncate_string(&branch, max_branch_len);
+        if use_classic {
+            format!("{}{}{}{}", dot_l1, FG_MUTED_CYAN, trunc_b, R)
+        } else {
+            let icon_vcs = "";
+            format!("{}{}{}{} {}{}", dot_l1, FG_MUTED_CYAN, icon_vcs, R, trunc_b, R)
+        }
     } else {
         String::new()
     };
@@ -665,12 +810,15 @@ fn main() {
         .unwrap_or_default();
     let model_effort = payload.model.as_ref().and_then(|m| m.effort.clone()).unwrap_or_default();
     let model_fmt = if !model_disp.is_empty() {
-        let max_m: usize = if cols < 65 { 14 } else if cols < 85 { 20 } else { 28 };
         let disp = if !model_effort.is_empty() && !model_disp.to_lowercase().contains(&model_effort.to_lowercase()) {
             let cap_effort = format!(" ({})", model_effort);
-            format!("{}{}", truncate_string(&model_disp, max_m.saturating_sub(cap_effort.len()).max(1)), cap_effort)
+            format!(
+                "{}{}",
+                truncate_string(&model_disp, max_model_len.saturating_sub(cap_effort.len()).max(1)),
+                cap_effort
+            )
         } else {
-            truncate_string(&model_disp, max_m)
+            truncate_string(&model_disp, max_model_len)
         };
         let icon_model = if use_classic { "" } else { " " };
         format!("{}{}{}{}{}{}", dot_l1, FG_LAVENDER, icon_model, disp, R, "")
@@ -682,16 +830,20 @@ fn main() {
     let plan = payload.plan_tier.as_deref().unwrap_or("");
     let email = payload.email.as_deref().unwrap_or("");
     let user_fmt = if !plan.is_empty() || !email.is_empty() {
-        let max_u = if cols < 65 { 12 } else if cols < 85 { 18 } else { 24 };
         let user_info = if !plan.is_empty() && !email.is_empty() {
-            format!("{}:{}", plan, email)
+            format!("{} ({})", plan, email)
         } else if !plan.is_empty() {
             plan.to_string()
         } else {
             email.to_string()
         };
-        let trunc_u = truncate_string(&user_info, max_u);
-        format!("{}{}{}", FG_GRAY, trunc_u, R)
+        let trunc_u = truncate_string(&user_info, max_user_len);
+        if use_classic {
+            format!("{}{}{}{}", dot_l1, FG_GRAY, trunc_u, R)
+        } else {
+            let icon_email = "󰇮 ";
+            format!("{}{}{}{}{}", dot_l1, FG_GRAY, icon_email, trunc_u, R)
+        }
     } else {
         String::new()
     };
@@ -726,20 +878,65 @@ fn main() {
     };
 
     // Quotas
-    let q_5h = payload.quota.as_ref().and_then(|q| q.gemini_5h.as_ref());
-    let q_5h_val = q_5h.and_then(|item| item.remaining_fraction).map(|f| (f * 100.0).clamp(0.0, 100.0)).unwrap_or(-1.0);
-    let q_5h_reset = q_5h.and_then(|item| item.reset_in_seconds).unwrap_or(0);
-    let q_5h_fmt = if q_5h_val >= 0.0 {
-        strip_separator(&build_quota_bar(q_5h_val, "5H", FG_MUTED_CYAN, q_5h_reset, use_classic))
+    let is_gemini_model = model_disp.to_lowercase().contains("gemini")
+        || payload
+            .model
+            .as_ref()
+            .and_then(|m| m.id.as_ref())
+            .map(|id| id.to_lowercase().contains("gemini"))
+            .unwrap_or(false);
+
+    let q_gem_5h = payload.quota.as_ref().and_then(|q| q.gemini_5h.as_ref());
+    let q_gem_wk = payload.quota.as_ref().and_then(|q| q.gemini_weekly.as_ref());
+    let has_gemini_quota = q_gem_5h.and_then(|q| q.remaining_fraction).is_some()
+        || q_gem_wk.and_then(|q| q.remaining_fraction).is_some();
+
+    let q_tp_5h = payload.quota.as_ref().and_then(|q| q.tp_5h.as_ref());
+    let q_tp_wk = payload.quota.as_ref().and_then(|q| q.tp_weekly.as_ref());
+    let has_tp_quota = q_tp_5h.and_then(|q| q.remaining_fraction).is_some()
+        || q_tp_wk.and_then(|q| q.remaining_fraction).is_some();
+
+    let (active_5h, active_wk) = if is_gemini_model {
+        if has_gemini_quota {
+            (q_gem_5h, q_gem_wk)
+        } else if has_tp_quota {
+            (q_tp_5h, q_tp_wk)
+        } else {
+            (None, None)
+        }
+    } else if has_tp_quota {
+        (q_tp_5h, q_tp_wk)
+    } else if has_gemini_quota {
+        (q_gem_5h, q_gem_wk)
+    } else {
+        (None, None)
+    };
+
+    let is_compact_bars = cols < 95;
+    let q_bar_len = if cols < 95 { 5 } else { 8 };
+
+    let q_5h_fmt = if let Some(q) = active_5h {
+        if let Some(frac) = q.remaining_fraction {
+            let val = (frac * 100.0).clamp(0.0, 100.0);
+            let reset_sec = q.reset_in_seconds.unwrap_or(0);
+            build_quota_bar(val, "5H", FG_MUTED_CYAN, reset_sec, q_bar_len, is_compact_bars, use_classic)
+        } else {
+            String::new()
+        }
     } else {
         String::new()
     };
 
-    let q_wk = payload.quota.as_ref().and_then(|q| q.gemini_weekly.as_ref());
-    let q_wk_val = q_wk.and_then(|item| item.remaining_fraction).map(|f| (f * 100.0).clamp(0.0, 100.0)).unwrap_or(-1.0);
-    let q_wk_reset = q_wk.and_then(|item| item.reset_in_seconds).unwrap_or(0);
-    let q_wk_fmt = if q_wk_val >= 0.0 {
-        build_quota_bar(q_wk_val, "7D", FG_DUSTY_ROSE, q_wk_reset, use_classic)
+    let q_wk_fmt = if cols < 75 && !q_5h_fmt.is_empty() {
+        String::new()
+    } else if let Some(q) = active_wk {
+        if let Some(frac) = q.remaining_fraction {
+            let val = (frac * 100.0).clamp(0.0, 100.0);
+            let reset_sec = q.reset_in_seconds.unwrap_or(0);
+            build_quota_bar(val, "7D", FG_DUSTY_ROSE, reset_sec, q_bar_len, is_compact_bars, use_classic)
+        } else {
+            String::new()
+        }
     } else {
         String::new()
     };
@@ -762,30 +959,66 @@ fn main() {
         if sb.enabled.unwrap_or(false) {
             let net = sb.allow_network.unwrap_or(false);
             if use_classic {
-                format!("{}SB:{}", FG_SAGE, if net { "net" } else { "no-net" })
+                format!("{}sandbox {}{}", FG_SAGE, if net { "net" } else { "on" }, R)
             } else {
-                format!("{}{} SB:{}", FG_SAGE, if net { "󰒍" } else { "󰈀" }, if net { "net" } else { "no-net" })
+                let icon_sb = if net { "󰒙" } else { "󰴴" };
+                format!("{}{} {}{}", FG_SAGE, icon_sb, if net { "net" } else { "on" }, R)
             }
+        } else if use_classic {
+            format!("{}sandbox off{}", FG_GRAY, R)
         } else {
-            format!("{}{} off{}", FG_GRAY, if use_classic { "SB:" } else { "󰦜" }, R)
+            let icon_off = "󰦜";
+            format!("{}{} off{}", FG_TERRACOTTA, icon_off, R)
         }
+    } else if use_classic {
+        format!("{}sandbox off{}", FG_GRAY, R)
     } else {
-        format!("{}{} off{}", FG_GRAY, if use_classic { "SB:" } else { "󰦜" }, R)
+        let icon_off = "󰦜";
+        format!("{}{} off{}", FG_TERRACOTTA, icon_off, R)
     };
 
-    // Artifacts & Tasks
+    // Artifacts, Subagents, Tasks
+    let item_sep = if cols < 90 { " ".to_string() } else { dot_l2.clone() };
+
     let artifacts = payload.artifact_count.unwrap_or(0);
     let art_fmt = if artifacts > 0 {
-        let icon_art = if use_classic { "artifacts" } else { "" };
-        format!("{}{}{}: {}{}{}{}", dot_l2, FG_FOG_BLUE, icon_art, FG_BRIGHT_WHITE, B, artifacts, R)
+        if use_classic {
+            let label = if cols < 90 { "art:" } else { "artifacts " };
+            format!("{}{}{}{}{}{}", item_sep, FG_GRAY, label, FG_BRIGHT_WHITE, artifacts, R)
+        } else {
+            let icon_art = "";
+            format!("{}{}{}{} {}{}{}{}", item_sep, FG_FOG_BLUE, icon_art, R, FG_BRIGHT_WHITE, B, artifacts, R)
+        }
+    } else {
+        String::new()
+    };
+
+    let subagents = match &payload.subagents {
+        Some(serde_json::Value::Array(arr)) => arr.len() as u32,
+        Some(serde_json::Value::Number(n)) => n.as_u64().unwrap_or(0) as u32,
+        _ => 0,
+    };
+    let sub_fmt = if subagents > 0 {
+        if use_classic {
+            let label = if cols < 90 { "sub:" } else { "subagents " };
+            format!("{}{}{}{}{}{}", item_sep, FG_GRAY, label, FG_BRIGHT_WHITE, subagents, R)
+        } else {
+            let icon_sub = "󱙺";
+            format!("{}{}{}{} {}{}{}{}", item_sep, FG_MUTED_CYAN, icon_sub, R, FG_BRIGHT_WHITE, B, subagents, R)
+        }
     } else {
         String::new()
     };
 
     let tasks = payload.task_count.unwrap_or(0);
     let task_fmt = if tasks > 0 {
-        let icon_task = if use_classic { "tasks" } else { "" };
-        format!("{}{}{}: {}{}{}{}", dot_l2, FG_DUSTY_ROSE, icon_task, FG_BRIGHT_WHITE, B, tasks, R)
+        if use_classic {
+            let label = if cols < 90 { "task:" } else { "tasks " };
+            format!("{}{}{}{}{}{}", item_sep, FG_GRAY, label, FG_BRIGHT_WHITE, tasks, R)
+        } else {
+            let icon_task = "";
+            format!("{}{}{}{} {}{}{}{}", item_sep, FG_DUSTY_ROSE, icon_task, R, FG_BRIGHT_WHITE, B, tasks, R)
+        }
     } else {
         String::new()
     };
@@ -804,6 +1037,7 @@ fn main() {
 
     let mut l3_right = vec![sb_fmt];
     if !art_fmt.is_empty() { l3_right.push(art_fmt); }
+    if !sub_fmt.is_empty() { l3_right.push(sub_fmt); }
     if !task_fmt.is_empty() { l3_right.push(task_fmt); }
 
     let title = if width < 40 { " Status " } else if width < 70 { " Antigravity " } else { " Antigravity Dashboard " };
@@ -813,13 +1047,13 @@ fn main() {
         FG_GRAY, R, title, FG_GRAY, "─".repeat(border_dash_len), R
     );
     let bot_border = format!(
-        "{}╰{}─{}╯{}",
-        FG_GRAY, "─".repeat(width.saturating_sub(4)), FG_GRAY, R
+        "{}╰─{}─╯{}",
+        FG_GRAY, "─".repeat(width.saturating_sub(4)), R
     );
 
-    let row1 = format_flex_wrap_line(&l1_left, &l1_right, width).join("\n");
-    let row2 = format_flex_wrap_line(&l2_left, &l2_right, width).join("\n");
-    let row3 = format_flex_wrap_line(&l3_left, &l3_right, width).join("\n");
+    let row1 = format_flex_wrap_line(&l1_left, &l1_right, width, &dot_l1).join("\n");
+    let row2 = format_flex_wrap_line(&l2_left, &l2_right, width, &dot_l2).join("\n");
+    let row3 = format_flex_wrap_line(&l3_left, &l3_right, width, &dot_l2).join("\n");
 
     println!("{}\n{}\n{}\n{}\n{}", top_border, row1, row2, row3, bot_border);
 }
