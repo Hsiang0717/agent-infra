@@ -45,7 +45,7 @@ This protocol governs agent behavior across all phases of orientation, planning,
     ### 1. Just-In-Time Orientation & Tool Selection
     - **JIT Exploration:** Inspect environment, configs, and tool capabilities scoped to the task. Avoid unnecessary whole-project discovery for localized edits.
     - **Incremental Edits First:** Always use `replace_file_content` for editing existing source files. Reserve `write_to_file` exclusively for creating new files or authorized full rewrites. Keep replacements surgical (prefer <80 lines per edit) to prevent whitespace and indentation mismatch. *(Exception: For Jupyter Notebooks (`.ipynb`), respect cell JSON integrity and specialized notebook tools where available; never use destructive text clobbering).*
-    - **Autonomous Visual Tooling:** For GUI, desktop, or web UI inspection and discussion, activate the `screen-capture` skill (invoking `Capture-Screen.ps1` via `run_command`) paired with multimodal inspection (`view_file`). Never speculate on visual states or request user screenshots when autonomous capture is available.
+    - **Autonomous Visual Tooling:** For GUI, desktop, or web UI inspection and discussion, activate the `screen-capture` skill (invoking `capture-screen.exe` via `run_command`) paired with multimodal inspection (`view_file`). Never speculate on visual states or request user screenshots when autonomous capture is available.
   </standard>
 
   <standard name="targeted_navigation" priority="P1">
@@ -86,7 +86,7 @@ This protocol governs agent behavior across all phases of orientation, planning,
         2. **Inspect Concrete Output & Side Effects:** Directly audit actual stdout/stderr, return codes, output artifacts, generated schema, or state mutations to confirm intended runtime behavior.
         3. **Smoke Test Paths:** Validate real startup, health checks, CLI help/version, or core user journeys end-to-end.
       - *Pure Libraries / Utility Modules:* When no standalone CLI or service entry point exists, execute a minimal scratch verification script or import sanity check to confirm runtime export integrity.
-      - *Frontend / UI & GUI Components (Autonomous Visual Verification):* When developing, verifying, or discussing GUI/UI components (web applications, desktop windows, or visual renderings), leverage the `screen-capture` skill (invoking `Capture-Screen.ps1` targeting via `-ProcessName`, `-Id`, `-WindowTitle`, or full screen), immediately inspect the captured image via `view_file`, and empirically validate visual layout and error states before declaring completion or presenting conclusions.
+      - *Frontend / UI & GUI Components (Autonomous Visual Verification):* When developing, verifying, or discussing GUI/UI components (web applications, desktop windows, or visual renderings), leverage the `screen-capture` skill (invoking `capture-screen.exe` targeting via `--name`, `--pid`, `--title`, or `--fullscreen`), immediately inspect the captured image via `view_file`, and empirically validate visual layout and error states before declaring completion or presenting conclusions.
     - **Explicit Simulation Boundary Declaration:**
       - If the environment genuinely prevents live execution (e.g., missing external third-party credentials, unavailable physical devices/hardware, or destructive production constraints), the agent MUST explicitly declare in the final response:
         1. The exact justification why live operational verification could not be executed.
