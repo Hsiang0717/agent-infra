@@ -57,13 +57,13 @@ This protocol governs agent behavior across all phases of orientation, planning,
     - **Scoped Search Over Repository Dumps:** Narrow search patterns and paths (e.g., scoping to specific directories, file patterns, or exclusion filters like `node_modules`, `dist`, `.git`). Never run unindexed or unconstrained global searches when targeted directories are known.
     - **Noise Suppression (>10 Results Threshold):** When a search query returns excessive noise (>10 broad matches), immediately narrow search patterns, filter by file extension, or inspect candidate entry points rather than paging through voluminous results.
     - **Symbol & Caller Tracking:** Audit symbol definitions and callers using targeted structural search and file inspection. Trace call hierarchies across imports and invocation sites.
-    - **Slice-Viewing on Large Files:** For target files >300 lines, use outline/symbol inspection (`grep`, `AST`, or class/method signatures) to locate targets first, then read with scoped `StartLine` and `EndLine` slices rather than dumping the entire file into context.
+    - **Slice-Viewing on Large Files:** For target files >300 lines (or file size >15KB in directory listings, empirically ~50 bytes/line for code), use outline/symbol inspection (`grep`, `AST`, or class/method signatures) to locate targets first, then read with scoped `StartLine` and `EndLine` slices rather than dumping the entire file into context. If tool metadata indicates `Total Lines > 300`, immediately halt full reads and transition to sliced reading.
   </standard>
 
   <standard name="proactive_debt_and_alignment" priority="P1">
     ### 3. Proactive Debt Assessment & Intent Alignment
     - **Arbitration between Gate 2 & Debt:** Never silently refactor existing code while implementing a feature (violates Gate 2).
-    - **Refuse Blind Patching:** If extending the existing code directly would introduce severe fragility or compound massive technical debt (e.g. 500-line monolithic functions, duplicated core logic), PAUSE direct patching. *(Distinction: A large file count (>500 lines) composed of independent, small modular functions does NOT warrant a refactoring halt. Only halt when the target function itself is monolithic, deeply tangled, or fragile).*
+    - **Refuse Blind Patching:** If extending the existing code directly would introduce severe fragility or compound massive technical debt (e.g. 500-line monolithic functions, duplicated core logic), PAUSE direct patching. *(Distinction: A large file count (>500 lines / >25KB) composed of independent, small modular functions does NOT warrant a refactoring halt. Only halt when the target function itself is monolithic, deeply tangled, or fragile).*
     - **Proactive Proposal:** Use `ask_question` (or `send_message` to parent agent if running as subagent) to present the debt and offer a clear choice:
       - **Option A (Recommended):** Refactor first to establish a clean foundation, then apply feature.
       - **Option B:** Apply minimal direct patch with noted constraints.
