@@ -1,0 +1,4 @@
+{
+  "name": "agy-handoff",
+  "description": "Session handoff & clipboard tool. Provides instant raw response copying via CLI and dynamic context packaging via /handoff."
+}
