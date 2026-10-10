@@ -12,10 +12,15 @@ license: MIT
 
 ## 📂 專案架構
 
-* **[agents/](agents/)**: Agent 系統提示詞（System Prompts）與行為準則。
+* **[agents/](agents/)**: Agent 系統提示詞（System Prompts）與自主工程生命週期準則。
+  * [GEMINI.md](agents/GEMINI.md): **自主工程代理協議 (AAEP - Autonomous Agent Engineering Protocol)**。基於「自主掌舵、崇尚實證、極致克制」四大生命週期階段（事實查證、審慎設計與先抽後建、低開銷外科手術修改、真機與多模態實證驗證）。
   * [AGENTS.md](agents/AGENTS.md): 跨階段通用 AI Coding Agent 執行準則。
-  * [GEMINI.md](agents/GEMINI.md): 嚴格關鍵工具守門協議（P0 Critical Tool Gates: Zero-Write on Ambiguity, Strict Scope Boundary, Two-Failure Reset）與執行標準。
   * [Karpathy.md](agents/Karpathy.md): 通用 LLM 編碼行為準則（Claude / Karpathy 風格）。
+* **[rules/](rules/)**: 全域與環境硬規則（`trigger: always_on`）。
+  * [cli_toolchain.md](rules/cli_toolchain.md): Windows pwsh 執行規範與 Agent-Native CLI 工具鏈（`rg`, `fd`, `jq`, `lsj`, `outline`）。
+  * [python_uv.md](rules/python_uv.md): 系統 Python 與 `uv` 工具鏈強制規範。
+* **[docs/](docs/)**: 設計哲學與架構演進文檔。
+  * [GEMINI_DESIGN_RATIONALE.md](docs/GEMINI_DESIGN_RATIONALE.md): **GEMINI.md 設計哲學與架構演進全紀錄**。詳細記錄為何拋棄「防守拘束器」、Context 經濟學、多模態閉環與各極端情境決策邊界，供後續迭代延續理念。
 * **[skills/](skills/)**: 功能擴充模組（Antigravity Skills）。
   * [pi-agent-delegate](skills/pi-agent-delegate/): 將任務委派給本機 `pi` CLI Agent。
   * [skill-creator](skills/skill-creator/): Skill 建立、評測與效能最佳化工具。
