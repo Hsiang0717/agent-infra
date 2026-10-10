@@ -21,6 +21,10 @@ description: "Enforce Windows pwsh environment and agent-native CLI tools (rg, f
   - **Port / Network Inspection:** Use `portj <port>` to instantly inspect listening port status, PID, and process name in compressed JSON. Never run unconstrained `netstat` or verbose `Get-NetTCPConnection`.
   - **Installed Apps Discovery:** Use `appj [query]` (PowerShell profile helper) to search installed Windows applications and get Name/AppID in compressed JSON. Never dump unconstrained `Get-StartApps`.
   - **Structural Outline Extraction:** Use `outline <file>` (PowerShell profile helper) to extract classes, functions, and exports with line numbers before reading large modules.
+  - **File Reading & Inspection (Strict Tool Hierarchy):**
+    - **Always use `view_file` tool:** Use the native `view_file` tool with scoped `StartLine` and `EndLine` slices for inspecting source code.
+    - **Forbidden CLI Commands:** Never execute raw dump commands via `run_command` (e.g. `cat`, `type`, `Get-Content`, `gc`, `more`). Dumping raw files to stdout wastes context tokens and lacks line-number anchors required for surgical editing.
+    - **Structure First:** If you only need to explore symbols or structure, use `outline <file>` or `rg -n` instead of reading raw files.
 
 
 
