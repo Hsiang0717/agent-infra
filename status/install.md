@@ -1,36 +1,42 @@
-# Antigravity CLI Statusline 安裝指南
+# Antigravity CLI Statusline (Rust 原生高效能版)
 
-這個 statusline 是一個輕量高效的 PowerShell 狀態列套件。`statusline.ps1` 是唯一入口，
-Git 與電源查詢則封裝於同資料夾的 `.psm1` 模組中，具備以下核心架構特性：
+這是專為 Google Antigravity CLI 設計的極致輕量原生狀態列 (`statusline.exe`)，以純 Rust 打造，擺脫 PowerShell 啟動延遲與記憶體開銷。
 
+## 核心架構特性
+
+* **極致效能**：冷啟動執行耗時 < 20ms，記憶體佔用極低。
 * **固定 3 行自適應儀表板（Zero-Jitter Dashboard）**：依據終端寬度（60 / 80 / 100+ 欄位）階梯式緊湊化進度條與數值，徹底防止換行跳動。
-* **按需延遲載入（Lazy Loading）**：CLI Payload 已帶有 VCS 分支時，完全跳過 Git 模組與外部 `git.exe` 呼叫；非 Git 目錄透過純 .NET 快速探針短路返回。
-* **極速反射查詢**：電源模組採用 .NET 型別快取與反射載入，擺脫 `Add-Type` 的編譯延遲（縮短至 ~9ms）。
+* **按需延遲載入（Lazy Loading）**：CLI Payload 已帶有 VCS 分支時，完全跳過 Git 查詢；非 Git 目錄透過純目錄探針短路返回。
 * **Morandi 莫蘭迪配色**：低飽和度 24-bit TrueColor，並精準支援原生 Nerd Font 圖標與 `--classic` 文字相容雙模式。
 
-## 安裝
+## 建置與安裝
 
 請在本專案目錄執行 PowerShell：
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\status\install.ps1
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\status\install.ps1 -Build
 ```
 
-*(若在專案上一層目錄執行，路徑為 `.\agent-infra\status\install.ps1`)*
+安裝腳本會：
+1. 使用 `cargo build --release` 編譯 `statusline-rs` 專案。
+2. 將 `statusline.exe` 部署至 `$env:USERPROFILE\.antigravity\statusline.exe`。
+3. 自動清理 `$env:USERPROFILE\.antigravity\` 目錄中過去舊版 PowerShell 的殘留檔案。
 
-請不要只複製 `statusline.ps1`；主腳本會從 `$PSScriptRoot` 自動載入 `Status.Git.psm1` 與 `Status.Power.psm1`。
+預覽安裝變更（不實際更動）：
+
+```powershell
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\status\install.ps1 -WhatIf
+```
 
 ## 設定 Antigravity CLI
 
-開啟：
+開啟 Antigravity CLI 設定檔：
 
 ```text
 C:\Users\<Username>\.gemini\antigravity-cli\settings.json
 ```
 
-### 推薦：Rust 原生執行檔模式（極致省記憶體，耗時 < 25ms）
-
-加入或更新：
+設定 `statusLine` 指向原生執行檔：
 
 ```json
 {
@@ -42,78 +48,32 @@ C:\Users\<Username>\.gemini\antigravity-cli\settings.json
 }
 ```
 
-### 相容：PowerShell 腳本模式
-
-```json
-{
-  "statusLine": {
-    "type": "custom",
-    "command": "pwsh -NoProfile -ExecutionPolicy Bypass -File C:/Users/<Username>/.antigravity/statusline.ps1",
-    "enabled": true
-  }
-}
-```
-
-## 更新
-
-更新程式碼後，重新執行安裝指令即可覆蓋主腳本與模組：
-
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\agent-infra\status\install.ps1
-```
-
-預覽不實際覆蓋檔案：
-
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\agent-infra\status\install.ps1 -WhatIf
-```
-
-## 測試
+## 測試與驗證
 
 測試空輸入：
 
 ```powershell
-'{}' | pwsh -NoProfile -ExecutionPolicy Bypass -File "$env:USERPROFILE\.antigravity\statusline.ps1"
+'{}' | & "$env:USERPROFILE\.antigravity\statusline.exe"
 ```
 
 顯示狀態圖例：
 
 ```powershell
-pwsh -NoProfile -ExecutionPolicy Bypass -File "$env:USERPROFILE\.antigravity\statusline.ps1" --legend
+& "$env:USERPROFILE\.antigravity\statusline.exe" --legend
 ```
 
 ## 命令列參數
 
-### Classic icon 模式
-
-適用於沒有 Nerd Font 的終端：
+### Classic icon 模式（無 Nerd Font 終端相容）
 
 ```json
-"command": "pwsh -NoProfile -ExecutionPolicy Bypass -File C:/Users/<Username>/.antigravity/statusline.ps1 --classic"
+"command": "C:/Users/<Username>/.antigravity/statusline.exe --classic"
 ```
 
-支援的別名：
+支援的別名：`--classic`, `--no-nerdfont`, `--compatibility`
 
-```text
---classic
---no-nerdfont
---compatibility
-```
-
-### Legend 模式
-
-支援：
-
-```text
---legend
--l
-legend
-```
-
-## 可選環境變數
+### Legend 圖例模式
 
 ```powershell
-$env:ANTIGRAVITY_STATUS_NO_POWER = '1'
+& "$env:USERPROFILE\.antigravity\statusline.exe" --legend
 ```
-
-設定後會停用電池 / AC 查詢，適合遠端或高頻刷新環境。

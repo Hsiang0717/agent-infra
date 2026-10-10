@@ -1,75 +1,81 @@
 [CmdletBinding(SupportsShouldProcess = $true)]
 param(
-    [string]$Destination = (Join-Path $env:USERPROFILE '.antigravity')
+    [string]$Destination = (Join-Path $env:USERPROFILE '.antigravity'),
+    [switch]$Build,
+    [switch]$CleanLegacy
 )
 
 $ErrorActionPreference = 'Stop'
 
-$nativeDllPath = Join-Path $PSScriptRoot 'Status.Native.dll'
-if (-not (Test-Path -LiteralPath $nativeDllPath)) {
-    $code = @"
-using System;
-using System.Runtime.InteropServices;
+$rsDir = Join-Path $PSScriptRoot 'statusline-rs'
+$releaseExe = Join-Path $rsDir 'target\release\statusline.exe'
 
-public static class StatusPipe {
-    [DllImport("kernel32.dll", SetLastError = true)]
-    private static extern IntPtr GetStdHandle(int nStdHandle);
-
-    [DllImport("kernel32.dll", SetLastError = true)]
-    private static extern bool PeekNamedPipe(
-        IntPtr hNamedPipe,
-        IntPtr lpBuffer,
-        uint nBufferSize,
-        IntPtr lpBytesRead,
-        out uint lpTotalBytesAvail,
-        IntPtr lpBytesLeftThisMessage
-    );
-
-    public static uint GetAvailableBytes() {
-        IntPtr hStdin = GetStdHandle(-10);
-        if (hStdin == IntPtr.Zero || hStdin == new IntPtr(-1)) return 0;
-        uint avail = 0;
-        if (PeekNamedPipe(hStdin, IntPtr.Zero, 0, IntPtr.Zero, out avail, IntPtr.Zero)) {
-            return avail;
+# 1. 如指定 -Build 或 release 執行檔不存在，則自動使用 cargo build --release
+if ($Build -or (-not (Test-Path -LiteralPath $releaseExe -PathType Leaf))) {
+    Write-Host "[Build] Compiling statusline-rs in release mode..." -ForegroundColor Cyan
+    Push-Location $rsDir
+    try {
+        cargo build --release
+        if ($LASTEXITCODE -ne 0) {
+            throw "Cargo build failed with exit code $LASTEXITCODE"
         }
-        return 0;
+    }
+    finally {
+        Pop-Location
     }
 }
-"@
-    Add-Type -TypeDefinition $code -OutputAssembly $nativeDllPath
+
+if (-not (Test-Path -LiteralPath $releaseExe -PathType Leaf)) {
+    throw "Compiled binary not found: $releaseExe"
 }
 
-$packageFiles = @(
+# 2. 確保目標目錄存在
+if (-not (Test-Path -LiteralPath $Destination)) {
+    New-Item -ItemType Directory -Path $Destination -Force | Out-Null
+}
+
+$targetExe = Join-Path $Destination 'statusline.exe'
+
+# 3. 安裝 Rust 原生執行檔
+if ($PSCmdlet.ShouldProcess($targetExe, 'Install Rust statusline.exe')) {
+    Copy-Item -LiteralPath $releaseExe -Destination $targetExe -Force
+    Write-Host "[Installed] Successfully deployed Rust statusline.exe to: $targetExe" -ForegroundColor Green
+}
+
+# 4. 清理過時舊版 PowerShell 實作殘留檔 (預設或指定 -CleanLegacy)
+$legacyFiles = @(
     'statusline.ps1',
     'Status.Git.psm1',
     'Status.Power.psm1',
     'Status.Native.dll'
 )
 
-New-Item -ItemType Directory -Path $Destination -Force | Out-Null
-
-foreach ($file in $packageFiles) {
-    $sourcePath = Join-Path $PSScriptRoot $file
-    $targetPath = Join-Path $Destination $file
-    if (-not (Test-Path -LiteralPath $sourcePath -PathType Leaf)) {
-        throw "Package file not found: $sourcePath"
-    }
-
-    if ($PSCmdlet.ShouldProcess($targetPath, 'Install statusline package')) {
-        Copy-Item -LiteralPath $sourcePath -Destination $targetPath -Force
+$legacyFound = @()
+foreach ($file in $legacyFiles) {
+    $legacyPath = Join-Path $Destination $file
+    if (Test-Path -LiteralPath $legacyPath) {
+        $legacyFound += $legacyPath
     }
 }
+# 也一併包含舊版備份檔
+Get-ChildItem -Path $Destination -Filter "statusline.ps1*" -File -ErrorAction SilentlyContinue | ForEach-Object {
+    if ($_.FullName -notin $legacyFound) { $legacyFound += $_.FullName }
+}
+Get-ChildItem -Path $Destination -Filter "Status.Git.psm1*" -File -ErrorAction SilentlyContinue | ForEach-Object {
+    if ($_.FullName -notin $legacyFound) { $legacyFound += $_.FullName }
+}
 
-$rustExe = Join-Path $PSScriptRoot 'statusline-rs\target\release\statusline.exe'
-if (Test-Path -LiteralPath $rustExe) {
-    $targetExe = Join-Path $Destination 'statusline.exe'
-    if ($PSCmdlet.ShouldProcess($targetExe, 'Install Rust statusline.exe')) {
-        Copy-Item -LiteralPath $rustExe -Destination $targetExe -Force
+if ($legacyFound.Count -gt 0) {
+    foreach ($item in $legacyFound) {
+        if ($PSCmdlet.ShouldProcess($item, 'Remove obsolete statusline file')) {
+            Remove-Item -LiteralPath $item -Force -ErrorAction SilentlyContinue
+            Write-Host "[Cleaned] Removed legacy file: $item" -ForegroundColor Yellow
+        }
     }
 }
 
 if ($WhatIfPreference) {
     Write-Output "Preview only; no files changed in: $Destination"
 } else {
-    Write-Output "Installed Antigravity statusline package to: $Destination"
+    Write-Output "Antigravity Rust statusline is ready at: $targetExe"
 }
