@@ -57,7 +57,7 @@ This protocol governs agent behavior across all phases of orientation, planning,
     - **Scoped Search Over Repository Dumps:** Narrow search patterns and paths (e.g., scoping to specific directories, file patterns, or exclusion filters like `node_modules`, `dist`, `.git`). Never run unindexed or unconstrained global searches when targeted directories are known.
     - **Noise Suppression (>10 Results Threshold):** When a search query returns excessive noise (>10 broad matches), immediately narrow search patterns, filter by file extension, or inspect candidate entry points rather than paging through voluminous results.
     - **Symbol & Caller Tracking:** Audit symbol definitions and callers using targeted structural search and file inspection. Trace call hierarchies across imports and invocation sites.
-    - **Slice-Viewing on Large Files:** For target files >300 lines (or file size >15KB in directory listings, empirically ~50 bytes/line for code), use outline/symbol inspection (`grep`, `AST`, or class/method signatures) to locate targets first, then read with scoped `StartLine` and `EndLine` slices rather than dumping the entire file into context. If tool metadata indicates `Total Lines > 300`, immediately halt full reads and transition to sliced reading.
+    - **Slice-Viewing & Anti-Roaming Budget:** Sliced reading via `view_file` (`StartLine`/`EndLine`) is strictly permitted ONLY for verifying exact lines immediately prior to editing (budget: max 1 slice per modification site). Sequential or roving sliced reads in the main context are STRICTLY PROHIBITED. If the target line/anchor inside any file >300 lines (or >15KB) is unknown, DO NOT read slices across the file; immediately halt and delegate anchor location to a Standard 6 `flash_lite` probe.
   </standard>
 
   <standard name="proactive_debt_and_alignment" priority="P1">
@@ -99,12 +99,13 @@ This protocol governs agent behavior across all phases of orientation, planning,
 
   <standard name="map_reduce_context_protection" priority="P1">
     ### 6. Map-Reduce Context Protection & Token Optimization (flash_lite Swarm)
-    - **Trigger Threshold & Empirical Sensors:**
-      When an audit, investigation, or user request meets ANY of the following empirical criteria, mandatory Map-Reduce subagent dispatch is triggered; continuous roaming reads of large files directly within the main context are strictly forbidden:
-      1. **Cross-Module Audit:** Auditing symbols, call sites (callers), dependencies, or config alignments across >=3 independent modules or files.
-      2. **File-Size Radar:** Any single candidate target file >25KB (empirically >500 lines) or target file list whose cumulative size >25KB (~500 lines). If directory listing or preliminary inspection detects files exceeding this threshold, never read them in the main context.
-      3. **Noisy Logs / Diagnostic Dumps:** Triaging noisy, voluminous build, runtime, or test logs (>100 lines) for stack traces and failure points.
-      4. **Broad / Fuzzy Inquiries:** When the user prompt is broad or fuzzy (e.g., "how does concurrency work?", "audit all API error codes", "check auth across the system") and Gate 1 discovery locates >=3 files or >25KB of candidate code, immediately deploy flash_lite probes rather than dumping candidates into main context.
+    - **Trigger Threshold & Empirical Sensors (Phase-Agnostic):**
+      Regardless of task phase (investigation, implementation prep, refactoring, or bugfixing), mandatory Map-Reduce subagent dispatch is triggered whenever ANY of the following empirical sensors trigger; sequential or roaming reads directly within the main context are strictly forbidden:
+      1. **Cross-Module Scope:** Tasks touching or examining symbols, call sites, or contracts across >=3 independent files.
+      2. **File-Size & Anchor Locating Radar:** Any candidate target file >25KB (~500 lines) or tool metadata indicating `Total Lines > 300` where exact edit anchor lines are not already known. The main agent MUST NOT browse through the file using multiple slice reads; it MUST dispatch a `flash_lite` probe to locate exact line ranges and signature context.
+      3. **Noisy Logs / Diagnostic Dumps:** Triaging noisy build, runtime, or test logs (>100 lines).
+      4. **Broad / Fuzzy Inquiries:** When the user prompt is open-ended or high-level, and preliminary discovery locates >=3 files or >25KB of candidate code.
+      5. **Main-Context Roaming Circuit Breaker (Budget = 2):** If the main agent performs >=2 consecutive exploratory read/search calls without having isolated the exact line numbers to edit, further main-context reads are HARD-BLOCKED. It MUST immediately deploy `flash_lite` swarm probes for remaining discovery.
     - **Map Phase (Distributed Probes Protocol):**
       - **Model & Type Boundary:** MUST use `invoke_subagent` configured strictly with `Model: "flash_lite"` and `TypeName: "research"` (enforced read-only; write tools strictly forbidden).
       - **Atomic Scope:** Each probe MUST be assigned an atomic, single-target responsibility (e.g., single directory, single file, or targeted symbol check). Open-ended or ambiguous mandates are strictly forbidden.
