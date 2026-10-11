@@ -1,0 +1,11 @@
+{
+  "agy-context-monitor": {
+    "PreInvocation": [
+      {
+        "type": "command",
+        "command": "bin\\agy-context-monitor.exe",
+        "timeout": 5
+      }
+    ]
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "context_limit": 256000,
+  "thresholds": {
+    "tight": 0.50,
+    "critical": 0.80
+  },
+  "messages": {
+    "nominal": "[Context Posture: NOMINAL]",
+    "tight": "[Context Posture: TIGHT]",
+    "critical": "[Context Posture: CRITICAL]"
+  }
+}

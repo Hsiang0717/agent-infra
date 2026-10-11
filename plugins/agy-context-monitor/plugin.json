@@ -1,0 +1,4 @@
+{
+  "name": "agy-context-monitor",
+  "description": "Native Rust context monitor hook. Real-time token usage probe (256k limit) injecting ephemeral status reminders on PreInvocation."
+}
