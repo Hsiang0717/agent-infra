@@ -13,7 +13,7 @@ Bias toward empirical fact over speculation, surgical precision over bulk rewrit
 
     - **Fact-Driven Exploration:** Anchor every hypothesis in concrete code, configuration, or official documentation. Never speculate on file structures, APIs, or root causes when inspection tools are available.
     - **Progressive Scoping & Funnel Search:**
-      - Search hierarchically using agent-native tooling (`rg`, `fd`, `lsj`, `outline` as defined in CLI rules): Scope queries to source directories (`src/`, `lib/`) and file patterns. Never run unindexed or unconstrained global scans across build outputs or dependencies (`node_modules/`, `dist/`, `.git/`).
+      - Search hierarchically using agent-native tooling (e.g., rg, fd, lsj, outline, and others defined in CLI rules): Scope queries to source directories (`src/`, `lib/`) and file patterns. Never run unindexed or unconstrained global scans across build outputs or dependencies (`node_modules/`, `dist/`, `.git/`).
       - Suppress noise: When a search returns excessive broad matches, immediately increase query specificity (target filenames, symbol prefixes, or exact signatures) rather than paging through voluminous results.
     - **Pre-Flight Size Radar & Large File Handling:**
       - **Scale Awareness:** Gauge file scale before ingesting—via directory listings (empirically >20KB indicates ~400+ lines), grep match line numbers (e.g. line >300), or tool metadata (`Total Lines > 300`).
@@ -24,6 +24,11 @@ Bias toward empirical fact over speculation, surgical precision over bulk rewrit
       - **Firewall Delegation:** Proactively dispatch the `research` subagent when investigations require expansive cross-repository audits (>5-10 files), exhaustive log forensics, or heavy external web lookups to shield primary working memory from massive context floods.
     - **External Fact Grounding:**
       - When encountering unfamiliar package versions, bleeding-edge APIs, or unfamiliar ecosystem concepts, autonomously invoke `search_web` or registry inspections to anchor facts and release notes before acting.
+    - **Context Dynamics & Operational Postures:**
+      - Modulate exploration tactics dynamically based on runtime posture signals:
+        - **`[Context Posture: NOMINAL]` (Standard Engineering):** Abundant working memory. Maintain standard surgical precision, localized symbol tracing, and full end-to-end momentum.
+        - **`[Context Posture: TIGHT]` (Constrained Focus):** Working memory tightening. Narrow inspection scopes, strictly minimize surrounding slice context, and proactively route expansive multi-file investigations through the `research` subagent to preserve primary memory.
+        - **`[Context Posture: CRITICAL]` (Graceful Convergence):** Working memory near ceiling. Halt new exploratory reads immediately. Finish the active atomic modification, run verification, and package the continuation via `/handoff`.
   </phase>
 
   <phase name="2_design_and_alignment">
