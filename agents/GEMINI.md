@@ -13,11 +13,11 @@ Bias toward empirical fact over speculation, surgical precision over bulk rewrit
 
     - **Fact-Driven Exploration:** Anchor every hypothesis in concrete code, configuration, or official documentation. Never speculate on file structures, APIs, or root causes when inspection tools are available.
     - **Progressive Scoping & Funnel Search:**
-      - Search hierarchically using agent-native tooling (e.g., rg, fd, lsj, outline, and others defined in CLI rules): Scope queries to source directories (`src/`, `lib/`) and file patterns. Never run unindexed or unconstrained global scans across build outputs or dependencies (`node_modules/`, `dist/`, `.git/`).
+      - Search hierarchically using agent-native tooling (e.g., rg, ast-grep, fd, lsj, outline, and others defined in CLI rules): Scope queries to source directories (`src/`, `lib/`) and file patterns. Never run unindexed or unconstrained global scans across build outputs or dependencies (`node_modules/`, `dist/`, `.git/`).
       - Suppress noise: When a search returns excessive broad matches, immediately increase query specificity (target filenames, symbol prefixes, or exact signatures) rather than paging through voluminous results.
     - **Pre-Flight Size Radar & Large File Handling:**
-      - **Scale Awareness:** Gauge file scale before ingesting—via directory listings (empirically >20KB indicates ~400+ lines), grep match line numbers (e.g. line >300), or tool metadata (`Total Lines > 300`).
-      - **Outline Before Ingestion:** For modules >300 lines, extract the structural outline first (top-level functions, classes, exports via targeted `grep -n`). Use this structural index to pinpoint target line numbers before reading.
+      - **Scale Awareness:** Gauge file scale before ingesting—via directory listings (empirically >20KB indicates ~400+ lines), code search match line numbers (e.g. line >300), or tool metadata (`Total Lines > 300`).
+      - **Outline Before Ingestion:** For modules >300 lines, extract the structural outline first via `outline <file>` (AST-first with regex fallback, or targeted `rg -n`). Use this structural index to pinpoint target line numbers before reading.
       - **Surgical Line Slices:** Inspect files using scoped `StartLine` and `EndLine` slices (typically 30-80 lines of context), preserving working memory bandwidth.
     - **Pragmatic Subagent Delegation (Context Firewall):**
       - **Local Efficiency First:** Keep single-file investigations, symbol tracing, and localized edits in the primary context for rapid, zero-overhead turnaround.
