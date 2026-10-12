@@ -55,3 +55,41 @@ winget install --id BurntSushi.ripgrep.MSVC sharkdp.fd ast-grep.ast-grep jqlang.
 * `portj <port>`：複合查詢 Port 狀態、PID 與對應 Process 名稱。
 * `psj [name] [top]`：依記憶體佔用排序之 Process 壓縮清單。
 * `killp <target>`：靜默強制刪除程序（支援 PID 或名稱）。
+
+---
+
+## 4. 載入架構與發布演進 (Architecture & Roadmap)
+
+目前採用 **方案 A (Dot-source)**，並保留 **方案 B (PowerShell Module)** 之擴充架構供日後發布參考：
+
+### 方案 A：宣告式 Dot-source 引用（目前採用）
+* **原理**：`install.ps1` 僅在 `$PROFILE` 寫入路徑檢查與引用：
+  ```powershell
+  # >>> AGENT-NATIVE HELPERS (START) >>>
+  if (Test-Path "C:\path\to\profile\AgentHelpers.ps1") {
+      . "C:\path\to\profile\AgentHelpers.ps1"
+  }
+  # <<< AGENT-NATIVE HELPERS (END) <<<
+  ```
+* **優點**：
+  - **Single Source of Truth**：直接以 Git 倉儲為唯一真實來源，修改任何 helper 函式重開 terminal 即生效，不需重複安裝。
+  - **保持 Profile 純淨**：`$PROFILE` 內無冗長邏輯，解耦性最高。
+
+### 方案 B：正式 PowerShell 模組化（未來跨機器/封裝發布方案）
+若未來需將本套件打包給團隊多台電腦或透過 winget / scoop / PSGallery 發布，標準做法為封裝為本機模組：
+1. 本專案已提供對應清單與腳本：
+   - 模組定義：[`AgentHelpers.psd1`](file:///C:/Users/Administrator/Desktop/skill開發/agent-infra/profile/AgentHelpers.psd1) + [`AgentHelpers.psm1`](file:///C:/Users/Administrator/Desktop/skill開發/agent-infra/profile/AgentHelpers.psm1)
+   - 模組安裝腳本：[`install-module.ps1`](file:///C:/Users/Administrator/Desktop/skill開發/agent-infra/profile/install-module.ps1)
+2. 執行方式：
+   ```powershell
+   # 建立 Junction/Symlink 連結（開發者推薦：零拷貝、同步即時生效、免改 $PROFILE）
+   .\profile\install-module.ps1
+
+   # 實體拷貝發布模式（分發至非開發環境）
+   .\profile\install-module.ps1 -Copy
+
+   # 移除模組
+   .\profile\install-module.ps1 -Uninstall
+   ```
+3. **優點**：完全免動使用者的 `$PROFILE`，PowerShell 具有 Module Auto-loading 機制，只要輸入指令即可隨選自動載入。
+

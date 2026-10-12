@@ -42,7 +42,7 @@ if (-not (Test-Path $profilePath)) {
     New-Item -ItemType File -Path $profilePath -Force | Out-Null
 }
 
-$helperContent = Get-Content -Raw -Path "$PSScriptRoot\AgentHelpers.ps1"
+$helperScriptPath = (Resolve-Path "$PSScriptRoot\AgentHelpers.ps1").Path
 $existingProfile = Get-Content -Raw -Path $profilePath -ErrorAction SilentlyContinue
 
 $startTag = "# >>> AGENT-NATIVE HELPERS (START) >>>"
@@ -50,7 +50,9 @@ $endTag   = "# <<< AGENT-NATIVE HELPERS (END) <<<"
 
 $block = @"
 $startTag
-$helperContent
+if (Test-Path "$helperScriptPath") {
+    . "$helperScriptPath"
+}
 $endTag
 "@
 
