@@ -1,4 +1,4 @@
 {
   "name": "git-agent-flow",
-  "description": "Maintains background pure shadow WIP snapshots (refs/wip/*) and provides /smart-commit to group and commit workspace changes atomically."
+  "description": "Provides /smart-commit to analyze workspace changes and commit them atomically following Conventional Commits guidelines."
 }

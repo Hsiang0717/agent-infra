@@ -1,11 +1,12 @@
 param(
-    [Parameter(Mandatory=$false)]
+    [Parameter(Mandatory=$false, Position=0)]
     [string]$Message,
 
     [Parameter(Mandatory=$false)]
     [string]$PlanJson
 )
 
+[Console]::InputEncoding = [System.Text.Encoding]::UTF8
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 
 function Execute-SmartCommit($repoDir, $commitMessage, $jsonPlan) {
@@ -19,10 +20,8 @@ function Execute-SmartCommit($repoDir, $commitMessage, $jsonPlan) {
         $branchName = (git symbolic-ref --short -q HEAD 2>$null)
         if (-not $branchName) {
             $branchName = (git rev-parse --short HEAD 2>$null)
-            if (-not $branchName) { $branchName = "main" }
+            if (-not $branchName) { $branchName = "HEAD" }
         }
-        $safeBranch = $branchName -replace '[^\w\.\-\/]', '_'
-        $wipRef = "refs/wip/$safeBranch/current"
 
         $status = git status --porcelain 2>$null
         if (-not $status) {
@@ -34,9 +33,10 @@ function Execute-SmartCommit($repoDir, $commitMessage, $jsonPlan) {
         $commitGroups = @()
         if ($jsonPlan -and $jsonPlan.Trim()) {
             try {
-                $commitGroups = $jsonPlan | ConvertFrom-Json
+                $parsed = $jsonPlan | ConvertFrom-Json
+                $commitGroups = @($parsed)
             } catch {
-                Write-Host "[Warning] [$repoName] Failed to parse PlanJson, falling back to single commit." -ForegroundColor Yellow
+                Write-Host "[Warning] [$repoName] Failed to parse PlanJson, falling back to single commit. Error: $_" -ForegroundColor Yellow
             }
         }
 
@@ -52,9 +52,6 @@ function Execute-SmartCommit($repoDir, $commitMessage, $jsonPlan) {
 
         Write-Host "[Info] [$repoName] Executing Smart Commit(s) on branch [$branchName]..." -ForegroundColor Cyan
 
-        $hasShadowWip = [bool](git rev-parse -q --verify "$wipRef" 2>$null)
-        $currentWipHash = if ($hasShadowWip) { (git rev-parse "$wipRef" 2>$null).Trim() } else { $null }
-
         $createdCommits = 0
         foreach ($group in $commitGroups) {
             $msg = if ($group.message) { $group.message } elseif ($group.msg) { $group.msg } else { "chore: update files" }
@@ -62,43 +59,33 @@ function Execute-SmartCommit($repoDir, $commitMessage, $jsonPlan) {
 
             if ($files.Count -gt 0) {
                 foreach ($f in $files) {
-                    git add -- "$f" 2>$null
+                    git add -- "$f"
                 }
             } else {
-                git add -A 2>$null
+                git add -A
             }
 
             # Check if index has staged changes
-            $stagedDiff = git diff --cached --name-only 2>$null
+            $stagedDiff = git diff --cached --name-only
             if ($stagedDiff) {
-                git commit -m "$msg" --no-verify 2>$null
+                $commitOutput = git commit -m "$msg" --no-verify 2>&1
                 if ($LASTEXITCODE -eq 0) {
                     $commitHash = (git rev-parse --short HEAD 2>$null).Trim()
                     Write-Host "  [Commit] [$commitHash] $msg" -ForegroundColor Green
                     $createdCommits++
+                } else {
+                    Write-Host "  [Error] Failed to commit: $msg" -ForegroundColor Red
+                    Write-Host "          $commitOutput" -ForegroundColor DarkRed
                 }
             }
         }
 
-        # If any unstaged files remain and this was a multi-group commit, check status
+        # Check remaining working tree status
         $remainingStatus = git status --porcelain 2>$null
         if ($remainingStatus) {
             Write-Host "  [Note] Some unstaged or untracked changes remain in the working directory." -ForegroundColor DarkYellow
-        }
-
-        # Synchronize and Archive Shadow WIP Ref
-        if ($createdCommits -gt 0) {
-            $newHeadHash = (git rev-parse HEAD 2>$null).Trim()
-            $archiveTime = Get-Date -Format "yyyyMMdd_HHmmss"
-            $archiveRef = "refs/wip/$safeBranch/archive/$archiveTime"
-
-            if ($currentWipHash) {
-                git update-ref "$archiveRef" "$currentWipHash" 2>$null
-                Write-Host "  [Shadow] Archived WIP history to $archiveRef" -ForegroundColor DarkGray
-            }
-
-            git update-ref "$wipRef" "$newHeadHash" 2>$null
-            Write-Host "  [Shadow] Re-aligned $wipRef to HEAD ($newHeadHash)" -ForegroundColor DarkGray
+        } else {
+            Write-Host "  [Success] All changes committed cleanly." -ForegroundColor Green
         }
 
     } finally {

@@ -1,55 +1,34 @@
 ---
 name: smart-commit
-description: "Manages Git Agent Flow: manual shadow snapshots, fast rollback, and grouping workspace changes into atomic Conventional Commits on HEAD."
-usage: "/smart-commit [commit_message] | /smart-commit snapshot [msg] | /smart-commit rollback [target] [file] | /smart-commit list"
+description: "Inspects workspace modifications, groups changes by intent/module, and generates atomic Conventional Commits on HEAD."
+usage: "/smart-commit [commit_message] | /smart-commit -PlanJson '<json>'"
 ---
 
 # /smart-commit Command Handler
 
-The `/smart-commit` command manages shadow WIP snapshots, rollbacks, and atomic **Conventional Commits** on `HEAD`.
+The `/smart-commit` command analyzes working directory changes, clusters them by architectural module and intent, and generates clean, atomic **Conventional Commits** directly on `HEAD`.
 
-## Sub-commands & Modes:
+## Workflow:
 
-### 1. Manual Shadow Snapshot (`/smart-commit snapshot [message]` or `/smart-commit snap`)
-Creates an isolated shadow snapshot in `refs/wip/<branch>/current` with an optional custom message without touching `HEAD` or user staging:
+### 1. Analyze Working Tree Changes
+- Inspect modified and untracked files using `git status -s`.
+- Identify distinct logical boundaries across components (e.g. `feat`, `fix`, `refactor`, `docs`, `test`, `chore`).
+
+### 2. Execute Atomic Commit(s)
+
+#### Option A: Multi-group Commit via Plan JSON
+When changes span multiple scopes or concerns, group files into a JSON array:
 ```powershell
-pwsh -NoProfile -File "$HOME/.gemini/config/plugins/git-agent-flow/scripts/git_snapshot.ps1" -Message "<snapshot_description>"
+$scriptPath = if (Test-Path "plugins/git-agent-flow/scripts/git_smart_commit.ps1") { "plugins/git-agent-flow/scripts/git_smart_commit.ps1" } else { "$HOME/.gemini/config/plugins/git-agent-flow/scripts/git_smart_commit.ps1" }
+pwsh -NoProfile -File $scriptPath -PlanJson '[{"message":"feat(core): implement feature X","files":["src/core.ts"]},{"message":"docs: update documentation","files":["README.md"]}]'
 ```
 
-### 2. Snapshot List & Inspection (`/smart-commit list`)
-Lists recent shadow snapshots:
+#### Option B: Single Atomic Commit
+When all current modifications belong to a single logical change:
 ```powershell
-pwsh -NoProfile -File "$HOME/.gemini/config/plugins/git-agent-flow/scripts/git_rollback.ps1" -List
+$scriptPath = if (Test-Path "plugins/git-agent-flow/scripts/git_smart_commit.ps1") { "plugins/git-agent-flow/scripts/git_smart_commit.ps1" } else { "$HOME/.gemini/config/plugins/git-agent-flow/scripts/git_smart_commit.ps1" }
+pwsh -NoProfile -File $scriptPath -Message "<type>(<scope>): <message>"
 ```
 
-### 3. Fast Rollback (`/smart-commit rollback [target] [file]`)
-- Rollback entire workspace to previous turn (`~1`):
-  ```powershell
-  pwsh -NoProfile -File "$HOME/.gemini/config/plugins/git-agent-flow/scripts/git_rollback.ps1"
-  ```
-- Rollback a single file to previous turn:
-  ```powershell
-  pwsh -NoProfile -File "$HOME/.gemini/config/plugins/git-agent-flow/scripts/git_rollback.ps1" -File "<file_path>"
-  ```
-- Rollback to a specific snapshot ref or commit hash:
-  ```powershell
-  pwsh -NoProfile -File "$HOME/.gemini/config/plugins/git-agent-flow/scripts/git_rollback.ps1" -Target "<target_ref_or_hash>" -File "<file_path>"
-  ```
-
-### 4. Semantic Atomic Commit on HEAD (`/smart-commit [commit_message]`)
-Analyzes current working directory modifications, clusters them by intent/module, and generates atomic Conventional Commits:
-1. **Analyze Working Tree Changes**:
-   - Inspect modified and untracked files using `git status --porcelain`.
-   - Formulate Conventional Commit groups (`feat`, `fix`, `refactor`, `docs`, `test`, `chore`).
-2. **Execute Grouped Commit Execution**:
-   - For multiple commit groups:
-     ```powershell
-     pwsh -NoProfile -File "$HOME/.gemini/config/plugins/git-agent-flow/scripts/git_smart_commit.ps1" -PlanJson '[{"message":"feat(core): ...","files":["file1","file2"]},{"message":"docs: ...","files":["README.md"]}]'
-     ```
-   - For a single atomic commit:
-     ```powershell
-     pwsh -NoProfile -File "$HOME/.gemini/config/plugins/git-agent-flow/scripts/git_smart_commit.ps1" -Message "<type>(<scope>): <message>"
-     ```
-3. **Synchronize & Report**:
-   - Automatically aligns `refs/wip/<branch>/current` to the new `HEAD` and archives old snapshots.
-   - Report created commits and confirm clean status.
+### 3. Verify
+- Verify resulting `git log --oneline -n <count>` and ensure working directory is in expected state via `git status -s`.
