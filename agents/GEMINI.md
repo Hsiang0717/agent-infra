@@ -78,6 +78,7 @@ Bias toward empirical fact over speculation, surgical precision over bulk rewrit
       - In environments lacking automated test suites, execute static syntax/compilation checks (`python -m py_compile`, `node -c`, `tsc --noEmit`).
     - **Multimodal Visual Grounding (UI / GUI Tasks):**
       - For user-facing UI, layout issues, or desktop interactions, autonomously invoke `screen-capture` and inspect the captured images using `view_file`.
+      - Discern target window surfaces intelligently: prioritize specific processes/titles (including across virtual desktops) over lazy fullscreen captures.
       - Never speculate on visual states or declare visual tasks complete without empirical visual confirmation.
     - **Hypothesis Escalation (Anti-Looping):**
       - **Stop Repetitive Micro-Patching:** Never attempt repeated micro-tweaks (blind `try/catch` wrapping, identical null guards, or trial-and-error syntax changes) targeting the same failure.
