@@ -57,6 +57,7 @@ struct WindowInfo {
     process_name: String,
     title: String,
     rect: RECT,
+    is_virtual_desktop: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -65,6 +66,7 @@ enum TargetMode {
     ByTitle(String),
     ByPid(u32),
     FullScreen,
+    ListWindows,
 }
 
 struct CliOptions {
@@ -142,9 +144,12 @@ unsafe extern "system" fn enum_windows_proc(hwnd: HWND, lparam: LPARAM) -> BOOL 
             &mut cloaked as *mut u32 as *mut c_void,
             std::mem::size_of::<u32>() as u32,
         );
-        if hr.is_ok() && cloaked != 0 {
+        // DWM_CLOAKED_APP (0x01) or DWM_CLOAKED_INHERITED (0x04) are truly hidden
+        // DWM_CLOAKED_SHELL (0x02) means on an inactive Virtual Desktop: keep it!
+        if hr.is_ok() && (cloaked & 1 != 0 || cloaked & 4 != 0) {
             return TRUE;
         }
+        let is_virtual_desktop = hr.is_ok() && (cloaked & 2 != 0);
 
         let mut buf = [0u16; 512];
         let copied = GetWindowTextW(hwnd, &mut buf);
@@ -164,6 +169,7 @@ unsafe extern "system" fn enum_windows_proc(hwnd: HWND, lparam: LPARAM) -> BOOL 
             process_name: proc_name,
             title,
             rect,
+            is_virtual_desktop,
         });
 
         TRUE
@@ -228,6 +234,9 @@ fn parse_cli_args() -> std::result::Result<CliOptions, String> {
                 }
                 output_path = Some(PathBuf::from(&args[i]));
             }
+            "--list" | "-l" | "-List" => {
+                target = Some(TargetMode::ListWindows);
+            }
             "--no-border" => {
                 no_border = true;
             }
@@ -236,7 +245,7 @@ fn parse_cli_args() -> std::result::Result<CliOptions, String> {
             }
             "-h" | "--help" => {
                 return Err(String::from(
-                    "Usage: capture-screen.exe [--name <process>] [--title <title>] [--pid <id>] [--fullscreen] [--out <path>] [--no-border]"
+                    "Usage: capture-screen.exe [--name <process>] [--title <title>] [--pid <id>] [--fullscreen] [--list] [--out <path>] [--no-border]"
                 ));
             }
             other => {
@@ -590,6 +599,19 @@ fn main() {
         }
     };
 
+    if let TargetMode::ListWindows = options.target {
+        let all_windows = collect_all_windows();
+        let mut list_out = String::from("[AVAILABLE_WINDOWS]\n");
+        for win in all_windows {
+            list_out.push_str(&format!(
+                "pid={}|process={}|virtual_desktop={}|title={}\n",
+                win.pid, win.process_name, win.is_virtual_desktop, win.title
+            ));
+        }
+        print_agent_stdout(list_out.trim_end());
+        std::process::exit(0);
+    }
+
     let abs_out_path = match fs::canonicalize(&options.output_path) {
         Ok(p) => p,
         Err(_) => {
@@ -658,15 +680,15 @@ fn main() {
             let matched = all_windows.iter().find(|w| match specific_target {
                 TargetMode::ByPid(pid) => w.pid == *pid,
                 TargetMode::ByProcessName(name) => {
-                    let clean_name = name.trim_end_matches(".exe").to_lowercase();
+                    let clean_name = name.trim_end_matches(".exe").trim_matches('*').to_lowercase();
                     let proc_clean = w.process_name.trim_end_matches(".exe").to_lowercase();
                     proc_clean == clean_name || proc_clean.contains(&clean_name)
                 }
                 TargetMode::ByTitle(title_query) => {
-                    let q = title_query.to_lowercase();
+                    let q = title_query.trim_matches('*').to_lowercase();
                     w.title.to_lowercase().contains(&q)
                 }
-                TargetMode::FullScreen => false,
+                _ => false,
             }).cloned();
 
             let target_win = match matched {
@@ -675,8 +697,8 @@ fn main() {
                     let mut list_out = String::from("available_windows:\n");
                     for win in all_windows.iter().take(30) {
                         list_out.push_str(&format!(
-                            "pid={}|process={}|title={}\n",
-                            win.pid, win.process_name, win.title
+                            "pid={}|process={}|virtual_desktop={}|title={}\n",
+                            win.pid, win.process_name, win.is_virtual_desktop, win.title
                         ));
                     }
                     print_agent_stderr(&format!(
@@ -721,11 +743,12 @@ fn main() {
 
             if captured {
                 print_agent_stdout(&format!(
-                    "[CAPTURED_IMAGE]\nstatus: success\nmode: {}\ntarget_pid: {}\ntarget_process: {}\ntarget_title: {}\nresolution: {}x{}\npath: {}",
+                    "[CAPTURED_IMAGE]\nstatus: success\nmode: {}\ntarget_pid: {}\ntarget_process: {}\ntarget_title: {}\nvirtual_desktop: {}\nresolution: {}x{}\npath: {}",
                     mode_used,
                     target_win.pid,
                     target_win.process_name,
                     target_win.title,
+                    target_win.is_virtual_desktop,
                     res_w,
                     res_h,
                     abs_out_path.display()

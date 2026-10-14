@@ -17,25 +17,43 @@ Provides autonomous screenshot capture of Windows GUI applications or the deskto
 
 ## How to Execute
 
-### 1. Capture Target Window or Screen (Native Rust CLI)
-Locate `capture-screen.exe` from this skill's directory or the plugin `bin/`:
+### 1. Target Discernment Protocol
+**Never lazily default to `--fullscreen`**: Fullscreen dilutes image resolution, leaks irrelevant background desktop windows, and **cannot capture windows located on other Virtual Desktops**!
+
+Follow this priority hierarchy to discern the target:
+1. **Agent-Launched GUI / Desktop App**:
+   - If you launched a Python GUI, Qt, Electron, or compiled binary: target by process name (`--name "electron.exe"`) or PID (`--pid <pid>`).
+2. **User-Opened Web Page or App**:
+   - If verifying a web app (e.g. `localhost:3000` / Vite / Next.js) or user-opened tool: target by window title wildcard (`--title "*localhost*"`, `--title "*Edge*"`) or browser process (`--name "msedge"`, `--name "chrome"`).
+3. **Target Discovery & Virtual Desktops (`--list`)**:
+   - If unsure of exact window title or process name, run `--list` (< 10ms) first to inspect all open windows across all virtual desktops:
+     ```powershell
+     <path_to>/capture-screen.exe --list
+     ```
+   - Target windows by name/title will capture successfully via Direct3D even if located on **another Virtual Desktop** or behind other windows.
+4. **Fullscreen (`--fullscreen`)**:
+   - Use ONLY when verifying whole-desktop layout, OS taskbar/system tray notifications, or multi-window desktop interactions.
+
+### 2. Capture Execution
+Locate `capture-screen.exe`:
 - Relative to this skill: `<skill_path>/bin/capture-screen.exe`
 - Or from workspace root: `.\plugins\screen-capture\bin\capture-screen.exe`
 - Or from global plugins: `~/.gemini/config/plugins/screen-capture/bin/capture-screen.exe`
 
-It leverages the modern `Windows.Graphics.Capture` (WGC) API for Direct3D11 GPU frame extraction (capturing hardware-accelerated Chrome/Electron/DWM windows with zero black-screen issues) and automatically hides the console during capture:
-
 ```powershell
-# Option A: Capture by process name (Recommended for quick targeting)
-<path_to>/capture-screen.exe --name "chrome.exe" --out "scratch/ui_check.png"
+# 1. Inspect candidate windows (when unsure or exploring virtual desktops)
+<path_to>/capture-screen.exe --list
 
-# Option B: Capture by window title wildcard
-<path_to>/capture-screen.exe --title "*DevTools*" --out "scratch/ui_check.png"
+# 2. Targeted capture by process name (Recommended for dev GUIs/browsers)
+<path_to>/capture-screen.exe --name "msedge" --out "scratch/ui_check.png"
 
-# Option C: Capture by process ID (PID)
+# 3. Targeted capture by window title wildcard (Works across virtual desktops!)
+<path_to>/capture-screen.exe --title "*localhost*" --out "scratch/ui_check.png"
+
+# 4. Targeted capture by PID
 <path_to>/capture-screen.exe --pid 1234 --out "scratch/ui_check.png"
 
-# Option D: Capture full screen
+# 5. Fullscreen (Only when whole-desktop context is genuinely needed)
 <path_to>/capture-screen.exe --fullscreen --out "scratch/fullscreen.png"
 ```
 
