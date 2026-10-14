@@ -5,63 +5,65 @@ description: Autonomous screen and window capture utility for UI verification, v
 
 # Screen Capture & Visual Inspection Skill
 
-Provides autonomous screenshot capture of Windows GUI applications or the desktop screen, enabling closed-loop visual inspection and verification with `view_file`.
-
-## When to Use This Skill
-- **GUI / Web UI Verification**: After modifying frontend, web UI, Electron, or desktop applications, to verify visual rendering and styling.
-- **Visual Bug Diagnosis**: When diagnosing UI layout glitches, rendering errors, or unexpected GUI popups.
-- **Collaborative Review**: When discussing UI appearance or design with the user.
+Autonomous screenshot capture of Windows GUI applications or the desktop screen for closed-loop visual verification via `view_file`.
 
 > [!IMPORTANT]
-> Never assume visual states or ask the user to provide screenshots when a live GUI process is running. Use this skill to autonomously capture and inspect the window.
+> **Prerequisites & Autonomous Closed-Loop**:
+> `capture-screen` captures **already running** windows; it does NOT launch applications for you.
+> 1. **Launch the target app yourself**: Use `Start-Process`, web dev server (`npm run dev`), or `schtasks /it` (for native Win32/Slint/Qt requiring desktop focus).
+> 2. **Allow rendering time**: Wait 1~2 seconds (`Start-Sleep -Seconds 2`) for GPU/DWM window initialization before capturing.
+> 3. **Zero user requests**: Never ask the user to launch apps or take screenshots. Own verification end-to-end.
 
-## How to Execute
+## Execution Workflow
 
-### 1. Target Discernment Protocol
-**Never lazily default to `--fullscreen`**: Fullscreen dilutes image resolution, leaks irrelevant background desktop windows, and **cannot capture windows located on other Virtual Desktops**!
+### 1. Locate Binary
+- Local: `<skill_path>/bin/capture-screen.exe` or `.\plugins\screen-capture\bin\capture-screen.exe`
+- Global: `~/.gemini/config/plugins/screen-capture/bin/capture-screen.exe`
 
-Follow this priority hierarchy to discern the target:
-1. **Agent-Launched GUI / Desktop App**:
-   - If you launched a Python GUI, Qt, Electron, or compiled binary: target by process name (`--name "electron.exe"`) or PID (`--pid <pid>`).
-2. **User-Opened Web Page or App**:
-   - If verifying a web app (e.g. `localhost:3000` / Vite / Next.js) or user-opened tool: target by window title wildcard (`--title "*localhost*"`, `--title "*Edge*"`) or browser process (`--name "msedge"`, `--name "chrome"`).
-3. **Target Discovery & Virtual Desktops (`--list`)**:
-   - If unsure of exact window title or process name, run `--list` (< 10ms) first to inspect all open windows across all virtual desktops:
-     ```powershell
-     <path_to>/capture-screen.exe --list
-     ```
-   - Target windows by name/title will capture successfully via Direct3D even if located on **another Virtual Desktop** or behind other windows.
-4. **Fullscreen (`--fullscreen`)**:
-   - Use ONLY when verifying whole-desktop layout, OS taskbar/system tray notifications, or multi-window desktop interactions.
-
-### 2. Capture Execution
-Locate `capture-screen.exe`:
-- Relative to this skill: `<skill_path>/bin/capture-screen.exe`
-- Or from workspace root: `.\plugins\screen-capture\bin\capture-screen.exe`
-- Or from global plugins: `~/.gemini/config/plugins/screen-capture/bin/capture-screen.exe`
+### 2. Target Discernment & Capture
+Never lazily default to `--fullscreen` (leaks background, dilutes resolution, cannot capture other Virtual Desktops). Prioritize specific targets:
 
 ```powershell
-# 1. Inspect candidate windows (when unsure or exploring virtual desktops)
-<path_to>/capture-screen.exe --list
+# A. Inspect available windows & virtual desktops (<10ms)
+<bin>/capture-screen.exe --list
 
-# 2. Targeted capture by process name (Recommended for dev GUIs/browsers)
-<path_to>/capture-screen.exe --name "msedge" --out "scratch/ui_check.png"
+# B. Target by process name (Recommended for dev GUIs & browsers)
+<bin>/capture-screen.exe --name "msedge" --out "scratch/ui.png"
 
-# 3. Targeted capture by window title wildcard (Works across virtual desktops!)
-<path_to>/capture-screen.exe --title "*localhost*" --out "scratch/ui_check.png"
+# C. Target by window title wildcard (Works across virtual desktops)
+<bin>/capture-screen.exe --title "*localhost*" --out "scratch/ui.png"
 
-# 4. Targeted capture by PID
-<path_to>/capture-screen.exe --pid 1234 --out "scratch/ui_check.png"
+# D. Target by PID
+<bin>/capture-screen.exe --pid 1234 --out "scratch/ui.png"
 
-# 5. Fullscreen (Only when whole-desktop context is genuinely needed)
-<path_to>/capture-screen.exe --fullscreen --out "scratch/fullscreen.png"
+# E. Fullscreen (Only when full desktop/taskbar context is strictly required)
+<bin>/capture-screen.exe --fullscreen --out "scratch/fullscreen.png"
 ```
 
-### 2. Autonomous Visual Inspection
-Immediately call the `view_file` tool on the resulting output path (e.g. `scratch/ui_check.png`).
-The image will be loaded directly into your multimodal vision context.
+### 3. Visual Grounding & Inspection
+Immediately inspect the captured image via `view_file`:
+```
+view_file(AbsolutePath="<workspace>/scratch/ui.png")
+```
+- Audit visual layout, padding, font rendering, colors, and responsive wrapping.
+- Verify resolution, inspect UI defects, and confirm against user requirements.
 
-### 3. Verify & Validate
-- Inspect layout alignment, margins, text wrapping, and colors.
-- Check for error dialogs, missing assets, or broken styling.
-- Report observations or confirm verification against requirements.
+---
+
+## Troubleshooting: Desktop Isolation for Native Apps (Win32/Slint/Qt)
+
+Agent shell commands (`run_command`) run inside an isolated background desktop (`exbox-...`), not the active user desktop (`WinSta0\Default`).
+While packaged/UWP apps (`calc.exe`) are auto-routed to `Default`, some native binaries (e.g. Slint/Winit) fail to acquire initial window focus or terminate immediately when launched from a background shell.
+
+**Interactive Launch Workaround (`schtasks /it`)**:
+Launch the binary directly into the user's interactive session with full focus without modifying application code:
+```powershell
+# 1. Dispatch into interactive session WinSta0\Default
+schtasks /create /tn "RunGuiTest" /tr "<path_to_binary.exe>" /sc once /st 23:59 /f /it /rl highest
+schtasks /run /tn "RunGuiTest"
+Start-Sleep -Seconds 2
+
+# 2. Capture and clean up
+<bin>/capture-screen.exe --name "<binary.exe>" --out "scratch/gui.png"
+schtasks /delete /tn "RunGuiTest" /f
+```
