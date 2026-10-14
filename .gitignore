@@ -12,3 +12,4 @@ Thumbs.db
 .agents/
 *.dll
 target/
+scratch/
