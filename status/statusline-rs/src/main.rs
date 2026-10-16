@@ -59,17 +59,117 @@ struct Model {
     effort: Option<String>,
 }
 
-#[allow(dead_code)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ModelPool {
+    Argon,
+    Gemini,
+    ThirdParty,
+}
+
+impl ModelPool {
+    fn tag(self) -> &'static str {
+        match self {
+            ModelPool::Argon => "ARG",
+            ModelPool::Gemini => "GEM",
+            ModelPool::ThirdParty => "3P",
+        }
+    }
+
+    fn color(self) -> &'static str {
+        match self {
+            ModelPool::Argon => FG_LAVENDER,
+            ModelPool::Gemini => FG_FOG_BLUE,
+            ModelPool::ThirdParty => FG_OAT,
+        }
+    }
+}
+
 #[derive(Deserialize, Default, Debug)]
 struct Quotas {
-    #[serde(rename = "gemini-5h")]
-    gemini_5h: Option<QuotaItem>,
-    #[serde(rename = "gemini-weekly")]
-    gemini_weekly: Option<QuotaItem>,
-    #[serde(rename = "3p-5h")]
-    tp_5h: Option<QuotaItem>,
-    #[serde(rename = "3p-weekly")]
-    tp_weekly: Option<QuotaItem>,
+    #[serde(flatten)]
+    buckets: std::collections::HashMap<String, QuotaItem>,
+}
+
+impl Quotas {
+    fn get_pool_quotas(&self, pool: ModelPool) -> (Option<&QuotaItem>, Option<&QuotaItem>) {
+        match pool {
+            ModelPool::Argon => {
+                let q_5h = self
+                    .buckets
+                    .get("gemini-argon-wtu-5h")
+                    .or_else(|| self.buckets.get("gemini-argon-5h"))
+                    .or_else(|| self.buckets.get("argon-5h"))
+                    .or_else(|| {
+                        self.buckets
+                            .iter()
+                            .find(|(k, _)| k.contains("argon") && k.ends_with("5h"))
+                            .map(|(_, v)| v)
+                    });
+                let q_wk = self
+                    .buckets
+                    .get("gemini-argon-wtu-weekly")
+                    .or_else(|| self.buckets.get("gemini-argon-weekly"))
+                    .or_else(|| self.buckets.get("argon-weekly"))
+                    .or_else(|| {
+                        self.buckets
+                            .iter()
+                            .find(|(k, _)| {
+                                k.contains("argon") && (k.ends_with("weekly") || k.ends_with("7d"))
+                            })
+                            .map(|(_, v)| v)
+                    });
+                (q_5h, q_wk)
+            }
+            ModelPool::Gemini => {
+                let q_5h = self.buckets.get("gemini-5h").or_else(|| {
+                    self.buckets
+                        .iter()
+                        .find(|(k, _)| {
+                            k.starts_with("gemini") && !k.contains("argon") && k.ends_with("5h")
+                        })
+                        .map(|(_, v)| v)
+                });
+                let q_wk = self.buckets.get("gemini-weekly").or_else(|| {
+                    self.buckets
+                        .iter()
+                        .find(|(k, _)| {
+                            k.starts_with("gemini")
+                                && !k.contains("argon")
+                                && (k.ends_with("weekly") || k.ends_with("7d"))
+                        })
+                        .map(|(_, v)| v)
+                });
+                (q_5h, q_wk)
+            }
+            ModelPool::ThirdParty => {
+                let q_5h = self.buckets.get("3p-5h").or_else(|| {
+                    self.buckets
+                        .iter()
+                        .find(|(k, _)| {
+                            !k.contains("gemini") && !k.contains("argon") && k.ends_with("5h")
+                        })
+                        .map(|(_, v)| v)
+                });
+                let q_wk = self.buckets.get("3p-weekly").or_else(|| {
+                    self.buckets
+                        .iter()
+                        .find(|(k, _)| {
+                            !k.contains("gemini")
+                                && !k.contains("argon")
+                                && (k.ends_with("weekly") || k.ends_with("7d"))
+                        })
+                        .map(|(_, v)| v)
+                });
+                (q_5h, q_wk)
+            }
+        }
+    }
+
+    fn has_pool(&self, pool: ModelPool) -> bool {
+        let (q_5h, q_wk) = self.get_pool_quotas(pool);
+        q_5h.and_then(|q| q.remaining_fraction).is_some()
+            || q_wk.and_then(|q| q.remaining_fraction).is_some()
+    }
 }
 
 #[derive(Deserialize, Default, Debug)]
@@ -593,6 +693,7 @@ fn build_context_bar(used_pct: f64, classic: bool) -> String {
 
 fn build_quota_bar(
     val: f64,
+    pool_badge: Option<(&str, &str)>,
     label: &str,
     bar_color: &str,
     reset_sec: i64,
@@ -606,6 +707,12 @@ fn build_quota_bar(
         format!("{} | {}", FG_GRAY, R)
     };
 
+    let prefix_str = if let Some((p_tag, p_color)) = pool_badge {
+        format!("{}{}{}{} ", p_color, B, p_tag, R)
+    } else {
+        String::new()
+    };
+
     if val < 0.0 {
         let mut bar = String::new();
         for _ in 0..target_bar_len {
@@ -616,8 +723,8 @@ fn build_quota_bar(
             }
         }
         return format!(
-            "{}{}{}{}{} {}{}{} N/A{}",
-            sep, FG_BRIGHT_WHITE, B, label, R, FG_GRAY, bar, R, R
+            "{}{}{}{}{}{} {}{}{} N/A{}",
+            sep, prefix_str, FG_BRIGHT_WHITE, B, label, R, FG_GRAY, bar, R, R
         );
     }
 
@@ -682,11 +789,11 @@ fn build_quota_bar(
         let t = format_reset_time(reset_sec, compact);
         if !t.is_empty() {
             if classic {
-                format!(" ~{}", t)
+                format!(" {}~{}{}", FG_GRAY, t, R)
             } else if compact {
-                format!(" 󰔟{}", t)
+                format!(" {}󰔟{}{}{}", FG_GRAY, FG_BRIGHT_WHITE, t, R)
             } else {
-                format!(" 󰔟 {}", t)
+                format!(" {}󰔟 {}{}{}", FG_GRAY, FG_BRIGHT_WHITE, t, R)
             }
         } else {
             String::new()
@@ -697,13 +804,13 @@ fn build_quota_bar(
 
     if classic {
         format!(
-            "{}{}{}{}{} {}{}{} {}{}%{}{}",
-            sep, FG_BRIGHT_WHITE, B, label, R, bar_color, bar, R, text_color, val_fmt, R, reset_str
+            "{}{}{}{}{}{} {}{}{} {}{}%{}{}",
+            sep, prefix_str, FG_BRIGHT_WHITE, B, label, R, bar_color, bar, R, text_color, val_fmt, R, reset_str
         )
     } else {
         format!(
-            "{}{}{}{}{} {} {}{}%{}{}",
-            sep, FG_BRIGHT_WHITE, B, label, R, bar, text_color, val_fmt, R, reset_str
+            "{}{}{}{}{}{} {} {}{}%{}{}",
+            sep, prefix_str, FG_BRIGHT_WHITE, B, label, R, bar, text_color, val_fmt, R, reset_str
         )
     }
 }
@@ -715,12 +822,13 @@ fn main() {
     // Check legend flag
     if args.iter().any(|a| a == "--legend" || a == "-l" || a == "legend") {
         println!("Antigravity Statusline Legend");
-        println!("READY     Agent is idle");
-        println!("THINKING  Agent is reasoning");
-        println!("WORKING   Agent is executing");
-        println!("TOOL      Tool call is active");
-        println!("CTX       Context window usage");
-        println!("5H / 7D   Quota remaining and reset time");
+        println!("READY           Agent is idle");
+        println!("THINKING        Agent is reasoning");
+        println!("WORKING         Agent is executing");
+        println!("TOOL            Tool call is active");
+        println!("CTX             Context window usage");
+        println!("GEM / ARG / 3P  Model pool category (Gemini / Argon / Claude & GPT)");
+        println!("5H / 7D         Quota remaining and cooldown reset timer");
         return;
     }
 
@@ -877,40 +985,38 @@ fn main() {
         String::new()
     };
 
-    // Quotas
-    let is_gemini_model = model_disp.to_lowercase().contains("gemini")
-        || payload
-            .model
-            .as_ref()
-            .and_then(|m| m.id.as_ref())
-            .map(|id| id.to_lowercase().contains("gemini"))
-            .unwrap_or(false);
+    // Quotas (Classified by Model Pool: Argon / Gemini / 3P)
+    let model_id_lower = payload
+        .model
+        .as_ref()
+        .and_then(|m| m.id.as_deref())
+        .unwrap_or("")
+        .to_lowercase();
+    let model_disp_lower = model_disp.to_lowercase();
 
-    let q_gem_5h = payload.quota.as_ref().and_then(|q| q.gemini_5h.as_ref());
-    let q_gem_wk = payload.quota.as_ref().and_then(|q| q.gemini_weekly.as_ref());
-    let has_gemini_quota = q_gem_5h.and_then(|q| q.remaining_fraction).is_some()
-        || q_gem_wk.and_then(|q| q.remaining_fraction).is_some();
-
-    let q_tp_5h = payload.quota.as_ref().and_then(|q| q.tp_5h.as_ref());
-    let q_tp_wk = payload.quota.as_ref().and_then(|q| q.tp_weekly.as_ref());
-    let has_tp_quota = q_tp_5h.and_then(|q| q.remaining_fraction).is_some()
-        || q_tp_wk.and_then(|q| q.remaining_fraction).is_some();
-
-    let (active_5h, active_wk) = if is_gemini_model {
-        if has_gemini_quota {
-            (q_gem_5h, q_gem_wk)
-        } else if has_tp_quota {
-            (q_tp_5h, q_tp_wk)
-        } else {
-            (None, None)
-        }
-    } else if has_tp_quota {
-        (q_tp_5h, q_tp_wk)
-    } else if has_gemini_quota {
-        (q_gem_5h, q_gem_wk)
+    let preferred_pools = if model_id_lower.contains("argon") || model_disp_lower.contains("argon") {
+        [ModelPool::Argon, ModelPool::Gemini, ModelPool::ThirdParty]
+    } else if model_id_lower.contains("gemini") || model_disp_lower.contains("gemini") {
+        [ModelPool::Gemini, ModelPool::Argon, ModelPool::ThirdParty]
+    } else if !model_id_lower.is_empty() || !model_disp_lower.is_empty() {
+        [ModelPool::ThirdParty, ModelPool::Gemini, ModelPool::Argon]
     } else {
-        (None, None)
+        [ModelPool::Gemini, ModelPool::Argon, ModelPool::ThirdParty]
     };
+
+    let active_pool = payload.quota.as_ref().and_then(|q| {
+        preferred_pools
+            .iter()
+            .copied()
+            .find(|&pool| q.has_pool(pool))
+    });
+
+    let (active_5h, active_wk) = match (payload.quota.as_ref(), active_pool) {
+        (Some(q), Some(pool)) => q.get_pool_quotas(pool),
+        _ => (None, None),
+    };
+
+    let pool_badge = active_pool.map(|p| (p.tag(), p.color()));
 
     let is_compact_bars = cols < 95;
     let q_bar_len = if cols < 95 { 5 } else { 8 };
@@ -919,7 +1025,16 @@ fn main() {
         if let Some(frac) = q.remaining_fraction {
             let val = (frac * 100.0).clamp(0.0, 100.0);
             let reset_sec = q.reset_in_seconds.unwrap_or(0);
-            build_quota_bar(val, "5H", FG_MUTED_CYAN, reset_sec, q_bar_len, is_compact_bars, use_classic)
+            build_quota_bar(
+                val,
+                pool_badge,
+                "5H",
+                FG_MUTED_CYAN,
+                reset_sec,
+                q_bar_len,
+                is_compact_bars,
+                use_classic,
+            )
         } else {
             String::new()
         }
@@ -933,7 +1048,17 @@ fn main() {
         if let Some(frac) = q.remaining_fraction {
             let val = (frac * 100.0).clamp(0.0, 100.0);
             let reset_sec = q.reset_in_seconds.unwrap_or(0);
-            build_quota_bar(val, "7D", FG_DUSTY_ROSE, reset_sec, q_bar_len, is_compact_bars, use_classic)
+            let wk_badge = if q_5h_fmt.is_empty() { pool_badge } else { None };
+            build_quota_bar(
+                val,
+                wk_badge,
+                "7D",
+                FG_DUSTY_ROSE,
+                reset_sec,
+                q_bar_len,
+                is_compact_bars,
+                use_classic,
+            )
         } else {
             String::new()
         }
