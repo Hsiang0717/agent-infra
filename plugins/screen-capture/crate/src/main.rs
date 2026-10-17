@@ -10,7 +10,7 @@ use windows::Foundation::TypedEventHandler;
 use windows::Graphics::Capture::{Direct3D11CaptureFramePool, GraphicsCaptureItem};
 use windows::Graphics::DirectX::Direct3D11::IDirect3DDevice;
 use windows::Graphics::DirectX::DirectXPixelFormat;
-use windows::Win32::Foundation::{CloseHandle, HMODULE, HWND, LPARAM, POINT, RECT, TRUE};
+use windows::Win32::Foundation::{CloseHandle, HGLOBAL, HMODULE, HWND, LPARAM, POINT, RECT, TRUE};
 use windows::Win32::Graphics::Direct3D::{
     D3D_DRIVER_TYPE_HARDWARE, D3D_DRIVER_TYPE_WARP, D3D_FEATURE_LEVEL_10_0, D3D_FEATURE_LEVEL_10_1,
     D3D_FEATURE_LEVEL_11_0, D3D_FEATURE_LEVEL_11_1,
@@ -29,6 +29,11 @@ use windows::Win32::Graphics::Gdi::{
     BITMAPINFOHEADER, BI_RGB, DIB_RGB_COLORS, MONITOR_DEFAULTTOPRIMARY, SRCCOPY,
 };
 use windows::Win32::System::Console::GetConsoleWindow;
+use windows::Win32::System::DataExchange::{
+    CloseClipboard, GetClipboardData, GetClipboardSequenceNumber,
+    IsClipboardFormatAvailable, OpenClipboard, RegisterClipboardFormatW,
+};
+use windows::Win32::System::Memory::{GlobalLock, GlobalSize, GlobalUnlock};
 use windows::Win32::System::StationsAndDesktops::{
     CloseDesktop, EnumDesktopWindows, OpenDesktopA, SetThreadDesktop, DESKTOP_CONTROL_FLAGS,
 };
@@ -67,12 +72,14 @@ enum TargetMode {
     ByPid(u32),
     FullScreen,
     ListWindows,
+    InteractiveSnip,
 }
 
 struct CliOptions {
     target: TargetMode,
     output_path: PathBuf,
     no_border: bool,
+    timeout_secs: u64,
 }
 
 struct ConsoleGuard(HWND);
@@ -193,11 +200,211 @@ fn collect_all_windows() -> Vec<WindowInfo> {
     windows
 }
 
+fn decode_dib(bytes: &[u8]) -> std::result::Result<image::DynamicImage, String> {
+    if bytes.len() < 40 {
+        return Err("DIB data too short".to_string());
+    }
+    let bi_size = u32::from_le_bytes(bytes[0..4].try_into().unwrap());
+    let bi_bit_count = u16::from_le_bytes(bytes[14..16].try_into().unwrap());
+    let bi_compression = u32::from_le_bytes(bytes[16..20].try_into().unwrap());
+    let bi_clr_used = u32::from_le_bytes(bytes[32..36].try_into().unwrap());
+
+    let mut palette_size: u32 = 0;
+    if bi_bit_count <= 8 {
+        palette_size = if bi_clr_used > 0 { bi_clr_used } else { 1 << bi_bit_count } * 4;
+    } else if bi_compression == 3 /* BI_BITFIELDS */ {
+        palette_size = 12;
+    }
+
+    let off_bits = 14 + bi_size + palette_size;
+    let file_size = 14 + bytes.len() as u32;
+
+    let mut bmp_data = Vec::with_capacity(file_size as usize);
+    bmp_data.extend_from_slice(b"BM");
+    bmp_data.extend_from_slice(&file_size.to_le_bytes());
+    bmp_data.extend_from_slice(&[0u8; 4]);
+    bmp_data.extend_from_slice(&off_bits.to_le_bytes());
+    bmp_data.extend_from_slice(bytes);
+
+    image::load_from_memory(&bmp_data).map_err(|e| e.to_string())
+}
+
+fn read_clipboard_image(out_path: &Path) -> Result<(u32, u32)> {
+    unsafe {
+        if OpenClipboard(None).is_err() {
+            return Err(windows::core::Error::new(
+                windows::core::HRESULT(-1),
+                "OpenClipboard failed",
+            ));
+        }
+
+        struct ClipGuard;
+        impl Drop for ClipGuard {
+            fn drop(&mut self) {
+                unsafe {
+                    let _ = CloseClipboard();
+                }
+            }
+        }
+        let _guard = ClipGuard;
+
+        // 1. Try CF_PNG (Standard modern Windows 10/11 Snipping Tool format)
+        let cf_png = RegisterClipboardFormatW(windows::core::w!("PNG"));
+        if cf_png != 0 && IsClipboardFormatAvailable(cf_png).is_ok() {
+            if let Ok(handle) = GetClipboardData(cf_png) {
+                let hglobal = HGLOBAL(handle.0);
+                let ptr = GlobalLock(hglobal);
+                if !ptr.is_null() {
+                    let size = GlobalSize(hglobal);
+                    let bytes = std::slice::from_raw_parts(ptr as *const u8, size);
+                    let res = image::load_from_memory(bytes);
+                    let _ = GlobalUnlock(hglobal);
+
+                    if let Ok(img) = res {
+                        let (w, h) = (img.width(), img.height());
+                        img.save(out_path).map_err(|e| {
+                            windows::core::Error::new(
+                                windows::core::HRESULT(-1),
+                                format!("Image save error: {}", e),
+                            )
+                        })?;
+                        return Ok((w, h));
+                    }
+                }
+            }
+        }
+
+        // 2. Fallback: Try CF_DIB (8)
+        const CF_DIB: u32 = 8;
+        if IsClipboardFormatAvailable(CF_DIB).is_ok() {
+            if let Ok(handle) = GetClipboardData(CF_DIB) {
+                let hglobal = HGLOBAL(handle.0);
+                let ptr = GlobalLock(hglobal);
+                if !ptr.is_null() {
+                    let size = GlobalSize(hglobal);
+                    let bytes = std::slice::from_raw_parts(ptr as *const u8, size);
+                    let res = decode_dib(bytes);
+                    let _ = GlobalUnlock(hglobal);
+
+                    if let Ok(img) = res {
+                        let (w, h) = (img.width(), img.height());
+                        img.save(out_path).map_err(|e| {
+                            windows::core::Error::new(
+                                windows::core::HRESULT(-1),
+                                format!("Image save error: {}", e),
+                            )
+                        })?;
+                        return Ok((w, h));
+                    }
+                }
+            }
+        }
+
+        Err(windows::core::Error::new(
+            windows::core::HRESULT(-1),
+            "No supported image format found in clipboard",
+        ))
+    }
+}
+
+fn is_snipping_tool_window_open() -> bool {
+    let windows = collect_all_windows();
+    windows.iter().any(|w| {
+        let name = w.process_name.to_lowercase();
+        name.contains("snippingtool")
+    })
+}
+
+fn launch_snipping_tool_interactive() {
+    let appdata = std::env::var("LOCALAPPDATA").unwrap_or_default();
+    let snip_path = format!("{}\\Microsoft\\WindowsApps\\SnippingTool.exe", appdata);
+    let target_exe = if Path::new(&snip_path).exists() {
+        snip_path
+    } else {
+        "SnippingTool.exe".to_string()
+    };
+
+    let ps_cmd = format!(
+        "$action = New-ScheduledTaskAction -Execute '{}'; \
+         $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries; \
+         $principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive; \
+         Register-ScheduledTask -TaskName 'AGY_SnipLaunch' -Action $action -Settings $settings -Principal $principal -Force | Out-Null; \
+         Start-ScheduledTask -TaskName 'AGY_SnipLaunch'; \
+         Start-Sleep -Seconds 1; \
+         Unregister-ScheduledTask -TaskName 'AGY_SnipLaunch' -Confirm:$false;",
+        target_exe
+    );
+
+    let _ = std::process::Command::new("powershell.exe")
+        .args(["-NoProfile", "-WindowStyle", "Hidden", "-Command", &ps_cmd])
+        .output();
+}
+
+fn capture_interactive_snip(out_path: &Path, timeout_secs: u64) -> Result<(u32, u32)> {
+    let initial_seq = unsafe { GetClipboardSequenceNumber() };
+
+    // 1. Launch SnippingTool on active user desktop
+    launch_snipping_tool_interactive();
+
+    let start = std::time::Instant::now();
+    let timeout = Duration::from_secs(timeout_secs);
+
+    // 2. Wait for SnippingTool window to appear (up to 15s)
+    let mut window_opened = false;
+    while start.elapsed() < Duration::from_secs(15) {
+        if is_snipping_tool_window_open() {
+            window_opened = true;
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(250));
+    }
+
+    if window_opened {
+        println!("剪取工具已開啟。請在畫面上框選並進行標記塗鴉，完成後【點擊複製】並【關閉視窗】...");
+        // 3. Monitor lifecycle: wait for SnippingTool window to close
+        while start.elapsed() < timeout {
+            std::thread::sleep(Duration::from_millis(250));
+            if !is_snipping_tool_window_open() {
+                // Window closed! User has completed editing and closed the tool.
+                println!("偵測到剪取工具視窗已關閉，正在讀取剪貼簿圖片...");
+                break;
+            }
+        }
+    } else {
+        // Fallback: If window enumeration didn't catch the window, wait for clipboard sequence change
+        println!("等待剪貼簿變更（請框選目標、完成標記並複製）...");
+        while start.elapsed() < timeout {
+            std::thread::sleep(Duration::from_millis(200));
+            let current_seq = unsafe { GetClipboardSequenceNumber() };
+            if current_seq != initial_seq {
+                break;
+            }
+        }
+    }
+
+    // 4. Retrieve latest clipboard image with retries
+    for _ in 0..15 {
+        std::thread::sleep(Duration::from_millis(80));
+        if let Ok((w, h)) = read_clipboard_image(out_path) {
+            return Ok((w, h));
+        }
+    }
+
+    Err(windows::core::Error::new(
+        windows::core::HRESULT(-1),
+        format!(
+            "Operation timed out after {} seconds without a valid clipboard image",
+            timeout_secs
+        ),
+    ))
+}
+
 fn parse_cli_args() -> std::result::Result<CliOptions, String> {
     let args: Vec<String> = env::args().collect();
     let mut target = None;
     let mut output_path = None;
     let mut no_border = true;
+    let mut timeout_secs = 180u64;
 
     let mut i = 1;
     while i < args.len() {
@@ -227,6 +434,16 @@ fn parse_cli_args() -> std::result::Result<CliOptions, String> {
             "--fullscreen" | "-FullScreen" => {
                 target = Some(TargetMode::FullScreen);
             }
+            "--snip" | "-s" | "--interactive" => {
+                target = Some(TargetMode::InteractiveSnip);
+            }
+            "--timeout" => {
+                i += 1;
+                if i >= args.len() {
+                    return Err(String::from("Missing value for --timeout"));
+                }
+                timeout_secs = args[i].parse::<u64>().map_err(|_| format!("Invalid timeout: {}", args[i]))?;
+            }
             "--out" | "-OutputPath" => {
                 i += 1;
                 if i >= args.len() {
@@ -245,7 +462,7 @@ fn parse_cli_args() -> std::result::Result<CliOptions, String> {
             }
             "-h" | "--help" => {
                 return Err(String::from(
-                    "Usage: capture-screen.exe [--name <process>] [--title <title>] [--pid <id>] [--fullscreen] [--list] [--out <path>] [--no-border]"
+                    "Usage: capture-screen.exe [--name <process>] [--title <title>] [--pid <id>] [--fullscreen] [--snip] [--timeout <sec>] [--list] [--out <path>] [--no-border]"
                 ));
             }
             other => {
@@ -256,12 +473,27 @@ fn parse_cli_args() -> std::result::Result<CliOptions, String> {
     }
 
     let target = target.unwrap_or(TargetMode::FullScreen);
-    let out = output_path.unwrap_or_else(|| PathBuf::from("screenshot.png"));
+    let out = output_path.unwrap_or_else(|| {
+        if matches!(target, TargetMode::InteractiveSnip) {
+            let timestamp = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs();
+            if Path::new("scratch").exists() {
+                PathBuf::from(format!("scratch/user_snip_{}.png", timestamp))
+            } else {
+                PathBuf::from(format!("user_snip_{}.png", timestamp))
+            }
+        } else {
+            PathBuf::from("screenshot.png")
+        }
+    });
 
     Ok(CliOptions {
         target,
         output_path: out,
         no_border,
+        timeout_secs,
     })
 }
 
@@ -620,6 +852,27 @@ fn main() {
             cur.join(&options.output_path)
         }
     };
+
+    if let TargetMode::InteractiveSnip = options.target {
+        ensure_parent_dir(&abs_out_path);
+        println!("啟動 Windows 剪取工具 (ms-screenclip:)... 請在螢幕上框選目標區域：");
+        match capture_interactive_snip(&abs_out_path, options.timeout_secs) {
+            Ok((w, h)) => {
+                print_agent_stdout(&format!(
+                    "[CAPTURED_IMAGE]\nstatus: success\nmode: interactive_snip\nresolution: {}x{}\npath: {}",
+                    w, h, abs_out_path.display()
+                ));
+                std::process::exit(0);
+            }
+            Err(err) => {
+                print_agent_stderr(&format!(
+                    "[CAPTURE_ERROR]\nerror: interactive_snip_failed\ndetail: {}",
+                    err
+                ));
+                std::process::exit(1);
+            }
+        }
+    }
 
     let console_hwnd = unsafe { GetConsoleWindow() };
     if console_hwnd != HWND::default() {

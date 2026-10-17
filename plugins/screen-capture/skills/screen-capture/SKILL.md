@@ -1,33 +1,33 @@
 ---
 name: screen-capture
-description: Autonomous screen and window capture utility for UI verification, visual bug diagnosis, and multimodal inspection using view_file.
+description: Unified AI-native screen capture utility for autonomous UI verification (Mode A) and collaborative interactive snip (Mode B) via capture-screen.exe.
 ---
 
-# Screen Capture & Visual Inspection Skill
+# Screen Capture & Visual Grounding Skill
 
-Autonomous screenshot capture of Windows GUI applications or the desktop screen for closed-loop visual verification via `view_file`.
+AI-native screen capture tool powered by a high-performance standalone Rust binary (`capture-screen.exe`). Provides two operational modes:
 
-> [!IMPORTANT]
-> **Prerequisites & Autonomous Closed-Loop**:
-> `capture-screen` captures **already running** windows; it does NOT launch applications for you.
-> 1. **Launch the target app yourself**: Use `Start-Process`, web dev server (`npm run dev`), or `schtasks /it` (for native Win32/Slint/Qt requiring desktop focus).
-> 2. **Allow rendering time**: Wait 1~2 seconds (`Start-Sleep -Seconds 2`) for GPU/DWM window initialization before capturing.
-> 3. **Zero user requests**: Never ask the user to launch apps or take screenshots. Own verification end-to-end.
+1. **Mode A: Autonomous Verification (Agent-Driven)**: Direct DirectX / Windows.Graphics.Capture of running applications and browser windows for closed-loop visual checks via `view_file`.
+2. **Mode B: Collaborative Interactive Snip (Human-in-the-Loop)**: Seamlessly triggers Windows Snipping Tool via `--snip`, captures user-selected areas (including pen/color markups), and streams observations directly into the multimodal conversation.
 
-## Execution Workflow
+---
 
-### 1. Locate Binary
+## 1. Locate Binary
 - Local: `<skill_path>/bin/capture-screen.exe` or `.\plugins\screen-capture\bin\capture-screen.exe`
 - Global: `~/.gemini/config/plugins/screen-capture/bin/capture-screen.exe`
 
-### 2. Target Discernment & Capture
-Never lazily default to `--fullscreen` (leaks background, dilutes resolution, cannot capture other Virtual Desktops). Prioritize specific targets:
+---
 
+## Mode A: Autonomous Window Capture & Closed-Loop Inspection
+
+Used autonomously by the agent to visually inspect UI changes, layout fidelity, and styling without user intervention.
+
+### Command Syntax:
 ```powershell
 # A. Inspect available windows & virtual desktops (<10ms)
 <bin>/capture-screen.exe --list
 
-# B. Target by process name (Recommended for dev GUIs & browsers)
+# B. Target by process name (Recommended for dev GUIs & web apps)
 <bin>/capture-screen.exe --name "msedge" --out "scratch/ui.png"
 
 # C. Target by window title wildcard (Works across virtual desktops)
@@ -36,34 +36,48 @@ Never lazily default to `--fullscreen` (leaks background, dilutes resolution, ca
 # D. Target by PID
 <bin>/capture-screen.exe --pid 1234 --out "scratch/ui.png"
 
-# E. Fullscreen (Only when full desktop/taskbar context is strictly required)
+# E. Fullscreen (Only when full taskbar/desktop context is strictly required)
 <bin>/capture-screen.exe --fullscreen --out "scratch/fullscreen.png"
 ```
 
-### 3. Visual Grounding & Inspection
-Immediately inspect the captured image via `view_file`:
+### Visual Grounding with `view_file`:
 ```
 view_file(AbsolutePath="<workspace>/scratch/ui.png")
 ```
 - Audit visual layout, padding, font rendering, colors, and responsive wrapping.
-- Verify resolution, inspect UI defects, and confirm against user requirements.
+
+### Window Lifecycle & Handling Unstarted Applications:
+1. Verify target window availability via `<bin>/capture-screen.exe --list`.
+2. If the application is not running or previously exited/crashed:
+   - Launch it into the interactive desktop session via `start-gui <path> [args] [workdir]`.
+   - Wait 1-2 seconds (`Start-Sleep -Seconds 2`) for GPU swapchain and window initialization.
+   - Capture the newly opened window using `<bin>/capture-screen.exe --name "<proc>" --out "<out.png>"`.
+3. If an application exits or crashes immediately upon launch, inspect its logs before retrying.
 
 ---
 
-## Troubleshooting: Desktop Isolation for Native Apps (Win32/Slint/Qt)
+## Mode B: Collaborative Interactive Snip Workflow
 
-Agent shell commands (`run_command`) run inside an isolated background desktop (`exbox-...`), not the active user desktop (`WinSta0\Default`).
-While packaged/UWP apps (`calc.exe`) are auto-routed to `Default`, some native binaries (e.g. Slint/Winit) fail to acquire initial window focus or terminate immediately when launched from a background shell.
+Used when:
+- The user requests interactive screen capture (e.g., via `/screen-capture` or asking the agent to inspect a specific screen area).
+- The user wants to crop a region or draw annotations (arrows, highlights, notes) to point out visual defects, layout bugs, or design requirements.
+- Autonomous window capture is occluded, minimized, or constrained by background isolation.
 
-**Interactive Launch Workaround (`schtasks /it`)**:
-Launch the binary directly into the user's interactive session with full focus without modifying application code:
+### 1. Trigger Snip via Rust Binary
 ```powershell
-# 1. Dispatch into interactive session WinSta0\Default
-schtasks /create /tn "RunGuiTest" /tr "<path_to_binary.exe>" /sc once /st 23:59 /f /it /rl highest
-schtasks /run /tn "RunGuiTest"
-Start-Sleep -Seconds 2
-
-# 2. Capture and clean up
-<bin>/capture-screen.exe --name "<binary.exe>" --out "scratch/gui.png"
-schtasks /delete /tn "RunGuiTest" /f
+<bin>/capture-screen.exe --snip --out "scratch/user_snip.png"
 ```
+- Automatically activates native Windows Snipping Tool in the user's interactive session.
+- The user selects the target region, marks details with pen/highlighter tools, clicks Copy, and closes the Snipping Tool window (`X`).
+- The binary monitors window lifecycle: closing the window serves as the definitive completion signal, instantly extracting and saving the annotated image.
+
+### 2. Inspect Screenshot via `view_file`
+```
+view_file(AbsolutePath="<workspace>/scratch/user_snip.png")
+```
+- Identify marked-up colors, callouts, arrows, and target UI components.
+
+### 3. Ground Analysis & Execute Action
+- Correlate the visual evidence directly with the relevant code (e.g., CSS, templates, components, state logic).
+- Confirm user expectations and proceed with surgical implementation or fixes.
+- Re-verify using Mode A or appropriate test commands once completed.
