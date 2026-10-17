@@ -27,3 +27,4 @@ description: "Enforce Windows pwsh environment and agent-native CLI tools (ast-g
     - `portj <port>`: Port status and owning process name/PID in compact JSON.
     - `psj [name] [top]`: Memory-ranked process probe in compact JSON.
     - `killp <target>`: Safe and quiet termination by PID or process name.
+    - `start-gui <path> [args] [workdir]`: Launch interactive GUI applications (native Win32/Qt/Slint or web/Python/Electron) into active user desktop (`WinSta0\Default`), bypassing Windows background session isolation.

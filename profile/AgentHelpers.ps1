@@ -125,3 +125,29 @@ function killp {
         return "No matching process: $Target"
     }
 }
+
+# 8. 穿透 Session 隔離啟動互動 GUI 程式 (支援原生與非原生 Python/Node/Electron/Java 等框架)
+function start-gui {
+    param(
+        [Parameter(Mandatory=$true)][string]$FilePath,
+        [string]$ArgumentList = "",
+        [string]$WorkingDirectory = ""
+    )
+    $workDir = if ($WorkingDirectory) { (Resolve-Path $WorkingDirectory).Path } else { (Get-Location).Path }
+    $taskName = "AGY_Launch_$(Get-Random)"
+    $actionParams = @{ Execute = $FilePath }
+    if (-not [string]::IsNullOrWhiteSpace($ArgumentList)) {
+        $actionParams['Argument'] = $ArgumentList
+    }
+    if (-not [string]::IsNullOrWhiteSpace($workDir)) {
+        $actionParams['WorkingDirectory'] = $workDir
+    }
+    $action = New-ScheduledTaskAction @actionParams
+    $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
+    $principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive
+    Register-ScheduledTask -TaskName $taskName -Action $action -Settings $settings -Principal $principal -Force | Out-Null
+    Start-ScheduledTask -TaskName $taskName | Out-Null
+    Start-Sleep -Milliseconds 600
+    Unregister-ScheduledTask -TaskName $taskName -Confirm:$false | Out-Null
+}
+
