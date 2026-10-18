@@ -1,5 +1,5 @@
 {
-  "context_limit": 256000,
+  "context_limit": 200000,
   "thresholds": {
     "tight": 0.50,
     "critical": 0.80
