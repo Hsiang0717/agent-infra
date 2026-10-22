@@ -12,9 +12,10 @@ description: "Enforce Windows pwsh environment and agent-native CLI tools (ast-g
 - **Inspection & Search Hierarchy (Native Tools First):**
   - **File Reading:** Always prefer native `view_file` tool with scoped `StartLine` and `EndLine` slices. Never run raw dump commands (`cat`, `type`, `Get-Content`).
   - **File Discovery:** Use native `fd [pattern]` (auto-ignores `.git`/`node_modules`).
-  - **Code Search & Semantics:**
-    - `rg -n [pattern] [path]`: Fast literal/regex search. Default choice for text & keyword matching (`file:line:text` is token-optimal; never use unconstrained `rg --json`).
-    - `ast-grep -p '<pattern>'`: AST-based structural search. Use when matching language syntax trees across multiple lines where regex is fragile.
+  - **Code Search & Semantics (The Funnel Architecture):**
+    - `rg -n [pattern] [path]`: Fast literal/regex search (Layer 1: Broad exploration). Default choice for keywords, error codes, logs, and non-AST assets (.env, .json, markdown). Use `rg -l` to quickly isolate candidate files in massive codebases before running AST tooling.
+    - `ast-grep -p '<pattern>'`: AST-based structural search (Layer 2: Structural precision). Use for multi-line syntax trees, API caller analysis, and contract audits (immune to whitespace/formatting).
+    - `ast-grep -p '<pat>' -r '<repl>' -U`: Direct AST rewrite for mass batch refactoring across callers.
     - `outline <file>`: Structural AST outline (`ast-grep outline --view=expanded`), auto-fallbacks to indented `rg -n`.
   - **VCS Status:** Use native `git status -s` (minimal 2-char status prefix, no wrapper needed).
 
