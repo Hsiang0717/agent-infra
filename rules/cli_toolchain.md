@@ -12,11 +12,19 @@ description: "Enforce Windows pwsh environment and agent-native CLI tools (ast-g
 - **Inspection & Search Hierarchy (Native Tools First):**
   - **File Reading:** Always prefer native `view_file` tool with scoped `StartLine` and `EndLine` slices. Never run raw dump commands (`cat`, `type`, `Get-Content`).
   - **File Discovery:** Use native `fd [pattern]` (auto-ignores `.git`/`node_modules`).
-  - **Code Search & Semantics (The Funnel Architecture):**
-    - `rg -n [pattern] [path]`: Fast literal/regex search (Layer 1: Broad exploration). Default choice for keywords, error codes, logs, and non-AST assets (.env, .json, markdown). Use `rg -l` to quickly isolate candidate files in massive codebases before running AST tooling.
-    - `ast-grep -p '<pattern>'`: AST-based structural search (Layer 2: Structural precision). Use for multi-line syntax trees, API caller analysis, and contract audits (immune to whitespace/formatting).
-    - `ast-grep -p '<pat>' -r '<repl>' -U`: Direct AST rewrite for mass batch refactoring across callers.
-    - `outline <file>`: Structural AST outline (`ast-grep outline --view=expanded`), auto-fallbacks to indented `rg -n`.
+  - **Code Search & Structural Precision (Funnel Protocol):**
+    - **Selection Rules:**
+      - Plain text, error messages, logs, or non-code files (`.env`, `.json`, `.md`): Use `rg -n [pattern]`.
+      - Code syntax (function/method calls, destructuring, decorators): MUST use `ast-grep -p` (never attempt multi-line regex in `rg`).
+      - Unknown monolithic files (>300 lines): NEVER inspect raw slices blindly; MUST run `outline <file>` first to obtain the structural index before reading.
+    - **ast-grep Quick Recipes:**
+      - Method/function calls: `ast-grep -p '$OBJ.myMethod($$$ARGS)'`
+      - Arbitrary destructuring: `ast-grep -p 'const { $$$PRE, targetKey, $$$POST } = $OBJ'`
+      - Class / function declarations: `ast-grep -p 'function $NAME($$$) { $$$ }'`
+      - Mass batch refactor across 3+ files: `ast-grep -p 'oldFn($$$A)' -r 'newFn($$$A)' -U` (deterministic zero-token execution; avoids file-by-file LLM rewrite).
+    - **Tooling Constraints:**
+      - Prohibited: Crafting multi-line regexes in `rg` to capture functions or statements across line breaks.
+      - Prohibited: Deep file slicing on unfamiliar code (>300 lines) without a pre-flight `outline <file>`.
   - **VCS Status:** Use native `git status -s` (minimal 2-char status prefix, no wrapper needed).
 
 - **Agent-Native CLI Helpers (Essential pwsh extensions):**
