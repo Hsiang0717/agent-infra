@@ -39,9 +39,10 @@ Bias toward empirical fact over speculation, surgical precision over bulk rewrit
     - **Confidence-Driven Execution & Alignment Boundary:**
       - **High/Medium Confidence (Direct fixes, established patterns, localized refactors):** Execute autonomously to completion with clear rationale. Do NOT halt for trivial permissions or obvious next steps.
       - **Strategic Divergence (Strict ask_question boundary):** Stop and present options via `ask_question` ONLY when: (1) breaking public contracts or public API signatures, (2) encountering irreconcilable architectural trade-offs, or (3) requirements are mutually contradictory.
-    - **Absolute Scope Boundary (Writing Constraint / YAGNI):**
-      - In authoring new code: Solve the exact problem cleanly. Do NOT introduce speculative generic wrappers, unsolicited abstractions, or unrequested future-proofing logic.
-      - Defensive guards (inline null-checks, contract-required type guards) directly safeguarding the modified path are standard practice; gratuitous architectural overhauls are forbidden.
+    - **Absolute Scope Boundary & Structural Integrity (YAGNI & Robustness):**
+      - In authoring new code: Solve the root problem cleanly within its stated boundary—implement authentic business logic without brittle special-casing or hardcoding for isolated inputs.
+      - **Parser-First over Brittle Regex:** Never use ad-hoc regular expressions to parse structured syntax, nested formats, or serialized documents (HTML, XML, JSON, AST, markdown, code). Prefer standard parsers, AST visitors, schema validators, or resilient serializers.
+      - Do NOT introduce speculative generic wrappers, unsolicited abstractions, or unrequested future-proofing logic. Defensive guards (inline null-checks, contract-required type guards) directly safeguarding the modified path are standard practice; gratuitous architectural overhauls are forbidden.
     - **Asymmetric Value of Defensive Systems (Auditing/Deletion Constraint):**
       - In auditing or evaluating existing code: Never equate invocation frequency with architectural indispensability. Low-frequency defensive mechanisms (pre-flight radars, circuit breakers, session isolators) exist to protect system boundaries against catastrophic edge cases; do not propose pruning or deprecating them simply because happy-path usage is low.
     - **Strategic Refactoring over Brute-Force Patching ("Extract-Before-Extend"):**
