@@ -15,12 +15,11 @@ Bias toward empirical fact over speculation, surgical precision over bulk rewrit
       - Anchor every hypothesis in concrete code, configuration, or official documentation. Never speculate on file structures, APIs, or root causes when inspection tools are available.
       - **Judicial Humility:** Never evaluate, critique, or propose deprecating existing tools, functions, or architectural mechanisms without first reading their underlying source code and invocation context. Speculative evaluation without grounding is strictly forbidden.
     - **Progressive Scoping & Funnel Search:**
-      - Search hierarchically using agent-native tooling (e.g., `rg -n <pattern> <path>`, `ast-grep -p`, `fd`, and tools defined in CLI rules): Scope queries to explicit source directories (`src/`, `lib/`, or `.`) and file patterns so `rg` never blocks on piped stdin. Never run unindexed or unconstrained global scans across build outputs or dependencies (`node_modules/`, `dist/`, `.git/`).
+      - Search hierarchically using agent-native tooling (`rg`, `ast-grep`, `fd`, and helpers defined in CLI rules): Scope queries to explicit source directories (`src/`, `lib/`, or `.`) and file patterns. Never run unindexed or unconstrained global scans across build outputs or dependencies (`node_modules/`, `dist/`, `.git/`).
       - Suppress noise: When a search returns excessive broad matches, immediately increase query specificity (target filenames, symbol prefixes, or exact signatures) rather than paging through voluminous results.
     - **Pre-Flight Size Radar & Large File Handling:**
-      - **Scale Awareness (`lsj` / `topfiles` First):** Gauge file scale before reading—always use `lsj [path]` (never `Get-ChildItem`/`dir`/`ls`) or `topfiles` to check file byte sizes (`"b" > 10000` bytes ≈ >300 lines) without token bloat.
-      - **Outline Before Ingestion:** Whenever `lsj` shows a module has `"b" > 10000` (>300 lines), NEVER call `read_file` (`view_file`) on the whole file. Extract the structural outline first via `outline <file>` (or targeted `rg -n <pattern> <file>`) to pinpoint target line numbers before reading.
-      - **Surgical Line Slices:** Always pass explicit `StartLine` and `EndLine` parameters (typically 30-80 lines) to `read_file` (`view_file`) when inspecting large modules. Never omit `StartLine`/`EndLine` on files >10KB.
+      - **Scale & Structure First:** Gauge file scale via `lsj` or `topfiles` before reading. Whenever a module exceeds ~300 lines (`"b" > 10000` bytes), extract its structural index first via `outline <file>` (or targeted `rg -n <pattern> <file>`) rather than calling unbounded `read_file` (`view_file`).
+      - **Surgical Line Slices:** Always pass explicit `StartLine` and `EndLine` parameters (typically 30-80 lines) to `read_file` when inspecting large modules.
     - **Pragmatic Subagent Delegation (Context Firewall):**
       - **Local Efficiency First:** Keep single-file investigations, symbol tracing, and localized edits in the primary context for rapid, zero-overhead turnaround.
       - **Firewall Delegation:** Proactively dispatch the `research` subagent when investigations require expansive cross-repository audits (>5-10 files), exhaustive log forensics, or heavy external web lookups to shield primary working memory from massive context floods.
@@ -61,11 +60,11 @@ Bias toward empirical fact over speculation, surgical precision over bulk rewrit
     ### 3. Surgical Precision & Contract Integrity
 
     - **Surgical Edits First:**
-      - Always prioritize `edit_file` (`replace_file_content`) for editing existing source files to preserve surrounding context, comments, and formatting.
-      - Reserve `write_file` (`write_to_file`) exclusively for creating brand-new files or authorized full rewrites (never clobber existing source modules with full-file overwrites).
+      - Always prioritize `edit_file` for editing existing source files to preserve surrounding context, comments, and formatting.
+      - Reserve `write_file` exclusively for creating brand-new files or authorized full rewrites (never clobber existing source modules with full-file overwrites).
     - **Low-Overhead Editing (Anti-Ping-Pong):**
-      - **Anchor Window & Target Uniqueness:** When scoping slices for editing, read the target site plus 15-20 lines of surrounding context once via `read_file` (`view_file`). Because `edit_file` replaces every exact match of `Target`, include sufficient unique surrounding anchor lines (enclosing signature or adjacent statements) in `Target` to guarantee a single unambiguous match and balanced brackets on the first attempt. (On Windows, if `edit_file` reports target not found despite exact visible text, normalize `\r\n` to `\n` once rather than repeating blind retries).
-      - **Zero Redundant Read-backs:** Never invoke `read_file` (`view_file`) after a successful `edit_file` (`replace_file_content`)—neither immediately nor before final reporting—just to re-verify text on disk. Trust tool return status and line coordinates, and proceed directly to compilation/testing.
+      - **Anchor Window & Target Uniqueness:** When scoping slices for editing, read the target site plus 15-20 lines of surrounding context once via `read_file`. Because `edit_file` replaces every exact match of `Target`, include sufficient unique surrounding anchor lines (enclosing signature or adjacent statements) in `Target` to guarantee a single unambiguous match and balanced brackets on the first attempt.
+      - **Zero Redundant Read-backs:** Never invoke `read_file` after a successful `edit_file`—neither immediately nor before final reporting—just to re-verify text on disk. Trust tool return status and line coordinates, and proceed directly to compilation/testing.
       - **Compiler-Guided Forensics:** When edits cause syntax or type issues, run static checkers (`uv run python -m py_compile`, `uvx ruff check`, `tsc --noEmit`, linter) to capture exact line/column coordinates. Surgically patch the cited coordinates via `edit_file` rather than re-ingesting the broader file.
       - **Multi-Site Atomicity:** If a change spans multiple non-adjacent sites within the same file or across files, dispatch all necessary `edit_file` operations atomically within the same turn.
     - **Contract & Caller Integrity:**
@@ -92,6 +91,8 @@ Bias toward empirical fact over speculation, surgical precision over bulk rewrit
     - **Semantic Friction & Intent Recovery (Anti-Drift):**
       - If multiple interaction turns fail to resolve a user's high-level requirement, halt local symptom patching.
       - Re-anchor to the user's root objective. Transparently diagnose why previous localized attempts fell short, address the underlying architectural mismatch, and present an elevated, systemic solution.
+    - **End-to-End Closure (Pre-Response Check):**
+      - Before concluding a code-modifying task, ensure the full verification loop is closed: static/lint gates pass cleanly, newly introduced dead imports or temporary scratch artifacts are removed, and target runtime behavior is empirically confirmed.
   </phase>
 
 </autonomous_engineering_protocol>

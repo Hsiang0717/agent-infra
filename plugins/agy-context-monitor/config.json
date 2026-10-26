@@ -6,7 +6,7 @@
   },
   "messages": {
     "nominal": "[Context Posture: NOMINAL]",
-    "tight": "[Context Posture: TIGHT]",
-    "critical": "[Context Posture: CRITICAL]"
+    "tight": "[Context Posture: TIGHT] Constrain read_file slices (outline first); delegate broad scans to research subagent; verify & converge.",
+    "critical": "[Context Posture: CRITICAL] Halt new exploration; finish active atomic edit_file, verify, and invoke /handoff."
   }
 }
