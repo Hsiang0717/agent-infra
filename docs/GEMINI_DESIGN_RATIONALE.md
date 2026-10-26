@@ -44,9 +44,9 @@ Antigravity (AGY) 是定位於 **Staff Software Engineer（資深主任軟體工
   1. 當規則中未明確攔截 `Get-ChildItem`，Flash 首輪預設執行 `Get-ChildItem -Recurse | Select-Object FullName, Length`，導致長路徑觸發 PowerShell 表格寬度截斷（將 `13165` bytes 截斷顯示為 `…65`），進而誤判大檔體積並跳過 `outline` 與切片讀取。
   2. 在 CLI 非互動式 `pwsh` 管道中，若執行 `rg -n <pattern>` 未帶 `<path>` 參數，`rg` 會因偵測到非 TTY stdin 而無限掛起等待標準輸入。
 - **演進決策**：
-  - **雙環境工具名精準對齊**：於協議與外掛中統一標註 CLI 主代理與子代理工具名稱（`read_file` (`view_file`)、`edit_file` (`replace_file_content`)、`write_file` (`write_to_file`)），消除詞彙落差。
-  - **漏斗探索首位錨定**：於 `rules/cli_toolchain.md` 第一條明確將 `lsj [path]` / `topfiles` 置於目錄探索首位，並將 `Get-ChildItem`、`dir`、`ls`、`tree`、`Select-String` 列入明確禁令；同時規範 `rg -n <pattern> <path>` 必填搜尋路徑以杜絕非 TTY 掛起。
-  - **編輯前 CRLF 物理正規化與切片完整性**：針對 Windows 下外部生成的 CRLF (`\r\n`) 檔案導致 `edit_file` 匹配失敗，於 `agy-context-monitor` 掛載 `PreToolUse` (`edit_file|replace_file_content`) 自動正規化 Hook，並於 `GEMINI.md` 強調 `Target` 必須取自單一連續 `read_file` 切片（嚴禁由搜尋片段拼接）。
+  - **全面統整為 CLI 原生工具名**：環境已全面收斂至純 `agy cli`，協議與外掛中全面廢除舊版 IDE 工具名稱（`view_file`、`replace_file_content`、`write_to_file`），100% 統一為 CLI 宣告的原生工具（`read_file`、`edit_file`、`write_file`），徹底消除別名干擾。
+  - **漏斗探索首位錨定**：於 `rules/cli_toolchain.md` 第一條明確將 `lsj [path]` / `topj` 置於目錄探索首位，並將 `Get-ChildItem`、`dir`、`ls`、`tree`、`Select-String` 列入明確禁令；同時規範 `rg -n <pattern> <path>` 必填搜尋路徑以杜絕非 TTY 掛起。
+  - **編輯前 CRLF 物理正規化與切片完整性**：針對 Windows 下外部生成的 CRLF (`\r\n`) 檔案導致 `edit_file` 匹配失敗，於 `agy-context-monitor` 掛載 `PreToolUse` (`edit_file`) 自動正規化 Hook，並於 `GEMINI.md` 強調 `Target` 必須取自單一連續 `read_file` 切片（嚴禁由搜尋片段拼接）。
 
 ---
 

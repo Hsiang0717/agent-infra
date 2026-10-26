@@ -16,12 +16,11 @@ license: MIT
   * [GEMINI.md](agents/GEMINI.md): **自主工程代理協議 (AAEP - Autonomous Agent Engineering Protocol)**。基於「自主掌舵、崇尚實證、極致克制」四大生命週期階段（事實查證與層級探索、審慎設計與先抽後建、低開銷外科手術修改、真機與多模態實證驗證），並深度整合 Context 語意動態姿態（NOMINAL / TIGHT / CRITICAL）。
   * [Karpathy.md](agents/Karpathy.md): 通用 LLM 編碼行為準則（Claude / Karpathy 風格）。
 * **[rules/](rules/)**: 全域與環境硬規則（`trigger: always_on`）。
-  * [cli_toolchain.md](rules/cli_toolchain.md): Windows pwsh 執行規範、Agent-Native CLI 工具鏈（`rg`, `fd`, `ast-grep`, `jq`, `outline`）與高密度壓縮輔助指令（`lsj`, `topfiles`, `pingj`, `portj`, `psj`, `killp`）。
+  * [cli_toolchain.md](rules/cli_toolchain.md): Windows pwsh 執行規範、Agent-Native CLI 工具鏈（`rg`, `fd`, `jq`, `outline`）與高密度壓縮輔助指令（`lsj`, `topj`, `pingj`, `portj`, `psj`, `killp`）。
   * [python_uv.md](rules/python_uv.md): 系統 Python 與 `uv` 工具鏈強制規範。
 * **[docs/](docs/)**: 設計哲學與架構演進文檔。
   * [GEMINI_DESIGN_RATIONALE.md](docs/GEMINI_DESIGN_RATIONALE.md): **GEMINI.md 設計哲學與架構演進全紀錄**。詳細記錄為何拋棄「防守拘束器」、Context 經濟學、多模態閉環與各極端情境決策邊界，供後續迭代延續理念。
 * **[plugins/](plugins/)**: 外掛整合套件（Antigravity Plugins）。
-  * [aaep](plugins/aaep/): 核心自主工程代理協議提醒與自我校準 Skill（`/aaep`），無額外環境與二進位相依，提供純粹心智重錨、四大生命週期檢核與防漂移自省清單。
   * [agy-context-monitor](plugins/agy-context-monitor/): Rust 原生開發之極速 Context 監控 Hook（`PreInvocation`），於推論前反向探測 Transcript Token 吞吐（< 1ms），並依據 256k 額度注入三級語意姿態提示（NOMINAL / TIGHT / CRITICAL），實現零數字干擾的動態收斂引導。
   * [agy-handoff](plugins/agy-handoff/): Rust 原生開發的高密度 Session 軌跡交接外掛，自動打包當前上下文並寫入系統剪貼簿。
   * [git-agent-flow](plugins/git-agent-flow/): 智慧型原子化 Conventional Commit 工作流外掛，提供 `/smart-commit` 意圖聚類、多模組分組提交與標準版控規範。

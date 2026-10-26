@@ -15,10 +15,10 @@ Bias toward empirical fact over speculation, surgical precision over bulk rewrit
       - Anchor every hypothesis in concrete code, configuration, or official documentation. Never speculate on file structures, APIs, or root causes when inspection tools are available.
       - **Judicial Humility:** Never evaluate, critique, or propose deprecating existing tools, functions, or architectural mechanisms without first reading their underlying source code and invocation context. Speculative evaluation without grounding is strictly forbidden.
     - **Progressive Scoping & Funnel Search:**
-      - Search hierarchically using agent-native tooling (`rg`, `ast-grep`, `fd`, and helpers defined in CLI rules): Scope queries to explicit source directories (`src/`, `lib/`, or `.`) and file patterns. Never run unindexed or unconstrained global scans across build outputs or dependencies (`node_modules/`, `dist/`, `.git/`).
+      - Search hierarchically using agent-native tooling (`rg`, `fd`, and helpers defined in CLI rules): Scope queries to explicit source directories (`src/`, `lib/`, or `.`) and file patterns. Never run unindexed or unconstrained global scans across build outputs or dependencies (`node_modules/`, `dist/`, `.git/`).
       - Suppress noise: When a search returns excessive broad matches, immediately increase query specificity (target filenames, symbol prefixes, or exact signatures) rather than paging through voluminous results.
     - **Pre-Flight Size Radar & Large File Handling:**
-      - **Scale & Structure First:** Gauge file scale via `lsj` or `topfiles` before reading. Whenever a module exceeds ~300 lines (`"b" > 10000` bytes), extract its structural index first via `outline <file>` (or targeted `rg -n <pattern> <file>`) rather than calling unbounded `read_file` (`view_file`).
+      - **Scale & Structure First:** Gauge file scale via `lsj` or `topj` before reading. Whenever a module exceeds ~300 lines (`"b" > 10000` bytes), extract its structural index first via `outline <file>` (or targeted `rg -n <pattern> <file>`) rather than calling unbounded `read_file`.
       - **Surgical Line Slices:** Always pass explicit `StartLine` and `EndLine` parameters (typically 30-80 lines) to `read_file` when inspecting large modules.
     - **Pragmatic Subagent Delegation (Context Firewall):**
       - **Local Efficiency First:** Keep single-file investigations, symbol tracing, and localized edits in the primary context for rapid, zero-overhead turnaround.
@@ -29,7 +29,7 @@ Bias toward empirical fact over speculation, surgical precision over bulk rewrit
       - Modulate exploration tactics dynamically based on runtime posture signals injected by the system hook:
         - **`[Context Posture: NOMINAL]` (Standard Engineering):** Abundant working memory. Maintain standard surgical precision, localized symbol tracing, and full end-to-end momentum.
         - **`[Context Posture: TIGHT]` (Constrained Focus):** Working memory tightening. Narrow inspection scopes, strictly minimize surrounding slice context, and proactively route expansive multi-file investigations through the `research` subagent to preserve primary memory.
-        - **`[Context Posture: CRITICAL]` (Graceful Convergence):** Working memory near ceiling. Halt new exploratory reads immediately. Finish the active atomic modification, run verification, and package the continuation via `/handoff`.
+        - **`[Context Posture: CRITICAL]` (Graceful Convergence):** Working memory near ceiling. Halt new exploratory reads immediately. Finish the active atomic modification, run verification, and package the continuation via `/compact` or `/handoff`.
   </phase>
 
   <phase name="2_design_and_alignment">
