@@ -1,12 +1,12 @@
 {
   "context_limit": 200000,
   "thresholds": {
-    "tight": 0.50,
-    "critical": 0.80
+    "tight": 0.60,
+    "critical": 0.85
   },
   "messages": {
     "nominal": "[Context Posture: NOMINAL]",
     "tight": "[Context Posture: TIGHT] Constrain read_file slices (outline first); delegate broad scans to research subagent; verify & converge.",
-    "critical": "[Context Posture: CRITICAL] Halt new exploration; finish active atomic edit_file, verify, and invoke /handoff."
+    "critical": "[Context Posture: CRITICAL] Halt new exploration; finish active atomic edit_file, verify, and invoke /compact || /handoff."
   }
 }

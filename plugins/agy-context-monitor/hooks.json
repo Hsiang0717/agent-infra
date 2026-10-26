@@ -9,7 +9,7 @@
     ],
     "PreToolUse": [
       {
-        "matcher": "edit_file|replace_file_content",
+        "matcher": "edit_file",
         "hooks": [
           {
             "type": "command",
