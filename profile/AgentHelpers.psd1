@@ -23,7 +23,7 @@
     FunctionsToExport = @(
         'outline',
         'lsj',
-        'topfiles',
+        'topj',
         'pingj',
         'portj',
         'psj',

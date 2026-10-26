@@ -28,7 +28,7 @@ function lsj {
 }
 
 # 3. 大型檔案雷達 (事前防範讀檔超限，自動排除雜訊目錄)
-function topfiles {
+function topj {
     param([int]$Count = 10, [string]$Path = ".")
     $root = (Resolve-Path $Path).Path
     $files = fd --type f --hidden --exclude .git --exclude node_modules --exclude .venv . $root

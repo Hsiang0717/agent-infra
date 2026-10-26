@@ -13,7 +13,6 @@ param(
 $requiredTools = @(
     @{ Name = "ripgrep";  Cmd = "rg";       Id = "BurntSushi.ripgrep.MSVC" },
     @{ Name = "fd";       Cmd = "fd";       Id = "sharkdp.fd" },
-    @{ Name = "ast-grep"; Cmd = "ast-grep"; Id = "ast-grep.ast-grep" },
     @{ Name = "jq";       Cmd = "jq";       Id = "jqlang.jq" },
     @{ Name = "uv";       Cmd = "uv";       Id = "astral-sh.uv" }
 )
