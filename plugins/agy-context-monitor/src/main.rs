@@ -372,6 +372,65 @@ pub fn probe_transcript_tokens(path: &Path) -> (u64, u64) {
     (0, 0)
 }
 
+// ─── PreToolUse CRLF Auto-Normalizer ────────────────────────────────────────
+
+pub fn normalize_file_crlf_if_needed(path: &Path) -> bool {
+    if !path.is_file() {
+        return false;
+    }
+
+    if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
+        if ext.eq_ignore_ascii_case("bat") || ext.eq_ignore_ascii_case("cmd") {
+            return false;
+        }
+    }
+
+    let bytes = match std::fs::read(path) {
+        Ok(b) => b,
+        Err(_) => return false,
+    };
+
+    // Skip binary files or files without CRLF
+    if bytes.contains(&0) || !bytes.windows(2).any(|w| w == b"\r\n") {
+        return false;
+    }
+
+    let text = match std::str::from_utf8(&bytes) {
+        Ok(s) => s,
+        Err(_) => return false,
+    };
+
+    let normalized = text.replace("\r\n", "\n");
+    std::fs::write(path, normalized.as_bytes()).is_ok()
+}
+
+fn handle_pre_edit_hook(explicit_file: Option<&str>) {
+    if let Some(f) = explicit_file {
+        normalize_file_crlf_if_needed(Path::new(f));
+        println!("{{\"decision\":\"allow\"}}");
+        return;
+    }
+
+    let mut raw_stdin = String::new();
+    if io::stdin().read_to_string(&mut raw_stdin).is_ok() {
+        let cleaned = raw_stdin.trim().trim_start_matches('\u{feff}');
+        if let Ok(val) = serde_json::from_str::<serde_json::Value>(cleaned) {
+            if let Some(args) = val.get("toolCall").and_then(|tc| tc.get("args")) {
+                let path_opt = args
+                    .get("Path")
+                    .or_else(|| args.get("TargetFile"))
+                    .or_else(|| args.get("path"))
+                    .and_then(|v| v.as_str());
+                if let Some(p) = path_opt {
+                    normalize_file_crlf_if_needed(Path::new(p));
+                }
+            }
+        }
+    }
+
+    println!("{{\"decision\":\"allow\"}}");
+}
+
 // ─── Main Entry Point ────────────────────────────────────────────────────────
 
 fn main() {
@@ -380,10 +439,15 @@ fn main() {
     if args.len() > 1 {
         let cmd = &args[1];
         match cmd.as_str() {
+            "--pre-edit" => {
+                handle_pre_edit_hook(args.get(2).map(|s| s.as_str()));
+                return;
+            }
             "--help" | "-h" => {
-                println!("agy-context-monitor v0.1.0 (Native Context Hook)");
+                println!("agy-context-monitor v0.1.0 (Native Context & PreToolUse Hook)");
                 println!("Usage:");
                 println!("  agy-context-monitor                   Run as PreInvocation hook (reads stdin)");
+                println!("  agy-context-monitor --pre-edit        Run as PreToolUse edit_file CRLF normalizer");
                 println!("  agy-context-monitor --config          Print currently resolved configuration");
                 println!("  agy-context-monitor --probe <file>    Probe token counts from transcript file");
                 println!("  agy-context-monitor --simulate <num>  Simulate semantic message for token count");
@@ -573,5 +637,27 @@ mod tests {
 
         assert_eq!(used, 23_000);
         assert_eq!(output, 200);
+    }
+
+    #[test]
+    fn test_normalize_file_crlf() {
+        let temp_dir = std::env::temp_dir();
+        let toml_file = temp_dir.join(format!("test_crlf_{}.toml", std::process::id()));
+        let bat_file = temp_dir.join(format!("test_crlf_{}.bat", std::process::id()));
+
+        std::fs::write(&toml_file, "a = 1\r\nb = 2\r\n").unwrap();
+        std::fs::write(&bat_file, "@echo off\r\necho hi\r\n").unwrap();
+
+        assert!(normalize_file_crlf_if_needed(&toml_file));
+        assert_eq!(std::fs::read_to_string(&toml_file).unwrap(), "a = 1\nb = 2\n");
+        // Second call returns false when already LF
+        assert!(!normalize_file_crlf_if_needed(&toml_file));
+
+        // .bat files must retain CRLF
+        assert!(!normalize_file_crlf_if_needed(&bat_file));
+        assert_eq!(std::fs::read_to_string(&bat_file).unwrap(), "@echo off\r\necho hi\r\n");
+
+        let _ = std::fs::remove_file(&toml_file);
+        let _ = std::fs::remove_file(&bat_file);
     }
 }

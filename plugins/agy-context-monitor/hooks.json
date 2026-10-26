@@ -6,6 +6,18 @@
         "command": "bin\\agy-context-monitor.exe",
         "timeout": 5
       }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "edit_file|replace_file_content",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bin\\agy-context-monitor.exe --pre-edit",
+            "timeout": 5
+          }
+        ]
+      }
     ]
   }
 }
