@@ -28,7 +28,8 @@
         'portj',
         'psj',
         'killp',
-        'start-gui'
+        'start-gui',
+        'lf'
     )
 
     # 匯出的 Cmdlet、別名、變數

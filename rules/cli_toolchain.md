@@ -12,7 +12,7 @@ description: "Enforce Windows pwsh environment and agent-native CLI tools (ast-g
 - **Inspection, Search & Editing Hierarchy (Native Tools First):**
   - **1. Directory & Scale Discovery:** Always use `lsj [path]` (compact JSON with exact byte size `"b"`) or `topfiles [count] [path]` to inspect topology and file sizes, or `fd [pattern]` for file search (auto-ignores `.git`/`node_modules`). Never run raw shell listing commands (`Get-ChildItem`, `dir`, `ls`, `tree`), which bloat tokens and truncate columns.
   - **2. Pre-Read Outline Gate & Scoped Reading:**
-    - Use native `read_file` (`view_file` in subagents) with explicit `StartLine` and `EndLine` slices (30-80 lines). Never run raw shell dump commands (`cat`, `type`, `Get-Content`).
+    - Use native `read_file` (`view_file` in subagents) with explicit `StartLine` and `EndLine` slices (30-80 lines). Never run raw shell dump or context-slicing commands (`cat`, `type`, `Get-Content`, `Select-String`).
     - For modules >300 lines (`"b" > 10000` in `lsj`), never call unbounded `read_file` on the whole file: run `outline <file>` (or `rg -n <pattern> <file>`) first to pinpoint exact line coordinates, then read only the targeted slice.
   - **3. Code Search & Structural Precision (Funnel Protocol):**
     - **Plain text, logs, or non-code files (`.env`, `.json`, `.md`):** Use `rg -n <pattern> <path>` (always pass an explicit `<path>` such as `src/` or `.` so `rg` never blocks waiting on non-TTY piped stdin).
@@ -22,13 +22,14 @@ description: "Enforce Windows pwsh environment and agent-native CLI tools (ast-g
       - Class / function declarations: `ast-grep -p 'function $NAME($$$) { $$$ }'`
       - Mass batch refactor across 3+ files: `ast-grep -p 'oldFn($$$A)' -r 'newFn($$$A)' -U`
   - **4. File Editing & Windows Line-Ending Hygiene:**
-    - Use `edit_file` for surgical replacements and `write_file` only for new files or full rewrites. If `edit_file` reports target not found on a Windows file despite exact visible text, normalize `\r\n` to `\n` once rather than repeating blind retries.
+    - Use `edit_file` (`replace_file_content`) for surgical replacements and `write_file` (`write_to_file`) only for new files or full rewrites. Always copy `Target` verbatim from a single contiguous `read_file` slice. If `edit_file` reports target not found on a Windows file despite exact visible text, run `lf <file>` once to normalize `\r\n` to `\n` rather than repeating blind retries.
   - **5. VCS Status:** Use native `git status -s` (minimal 2-char status prefix).
 
 - **Agent-Native CLI Helpers (Essential pwsh extensions):**
   - **Topology & Large Files:**
     - `lsj [path]`: Compact directory JSON (`[{"n":"file.ts","t":"f","b":1024}]`). Guaranteed Array.
     - `topfiles [count] [path]`: Large file radar (`[{"kb":120.5,"p":"bundle.js"}]`), auto-excludes `.git`/`node_modules`/.venv.
+    - `lf <path>`: In-place CRLF (`\r\n`) to UTF-8 no-BOM LF (`\n`) normalizer for external Windows files.
   - **Runtime & Diagnostics:**
     - `pingj [url]`: Silent local HTTP server probe (`{"ok":true,"code":200}`). Prevents catastrophic HTML dumps on dev-server checks.
     - `portj <port>`: Port status and owning process name/PID in compact JSON.
