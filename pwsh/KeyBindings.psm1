@@ -23,6 +23,11 @@ if ([System.Environment]::UserInteractive -and -not [Console]::IsOutputRedirecte
     Set-PSReadLineKeyHandler -Chord "UpArrow" -Function HistorySearchBackward
     Set-PSReadLineKeyHandler -Chord "DownArrow" -Function HistorySearchForward
 
+    # Atuin 智慧歷史引擎 (當前目錄優先、SQLite 索引與歷史搜尋)
+    if (Get-Command atuin -ErrorAction SilentlyContinue) {
+        atuin init powershell | Out-String | Invoke-Expression
+    }
+
     # Tab 鍵：全面回歸最順暢的「行內逐項輪替」，絕不彈出干擾輸入的選單
     # (連按 Tab 換下一個，Shift+Tab 換上一個)
     Set-PSReadLineKeyHandler -Chord "Tab" -Function TabCompleteNext

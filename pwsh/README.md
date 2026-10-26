@@ -20,6 +20,9 @@
 4. **環境安全防護**：
    - 僅在 `UserInteractive` 且未重導向輸出時啟用，避免在背景或 Agent 執行時報錯。
 
+5. **Atuin 智慧歷史整合 (可選，目錄感知優先)**：
+   - 自動偵測系統是否安裝 Atuin (`winget install atuinsh.atuin`)。若存在則啟用 SQLite 毫秒級索引，按 `UpArrow` 或 `Ctrl+R` 時優先展示當前目錄執行過的指令，並保留原有的 Tab 輪替與右鍵採納體驗。
+
 ---
 
 ## 🚀 安裝方式
