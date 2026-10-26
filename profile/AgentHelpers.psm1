@@ -6,21 +6,10 @@
 # 或由系統 PowerShell Profile ($PROFILE) 自動載入。
 # =====================================================================
 
-# 1. 結構大綱提取 (ast-grep outline 優先，Regex 降級備援)
+# 1. 結構大綱提取 (高速多語言宣告與裝飾器索引)
 function outline {
     param([Parameter(Mandatory=$true)][string]$File)
-    $sgCmd = if (Get-Command ast-grep -ErrorAction SilentlyContinue) { "ast-grep" } 
-             elseif (Get-Command sg -ErrorAction SilentlyContinue) { "sg" } 
-             else { $null }
-
-    if ($sgCmd) {
-        $out = & $sgCmd outline $File --view=expanded 2>$null
-        if ($out -and $LASTEXITCODE -eq 0 -and ($out -join "") -notmatch '^nothing found') {
-            return ($out -join "`n")
-        }
-    }
-    # Fallback: 支援縮排、存取修飾詞之多語言正則
-    $pattern = '^\s*(export\s+|pub\s+|async\s+)?(public|private|protected|static|final\s+)*(fn|func|function|def|class|interface|type|struct|enum|impl|trait)\b'
+    $pattern = '^\s*(@\w+|(export|default|pub(\([^)]+\))?|async|public|private|protected|static|final|abstract|override)\s+)*(fn|func|function|def|class|interface|type|struct|enum|impl|trait|mod)\b'
     rg -n $pattern $File
 }
 
@@ -125,3 +114,29 @@ function killp {
         return "No matching process: $Target"
     }
 }
+
+# 8. 穿透 Session 隔離啟動互動 GUI 程式 (支援原生與非原生 Python/Node/Electron/Java 等框架)
+function start-gui {
+    param(
+        [Parameter(Mandatory=$true)][string]$FilePath,
+        [string]$ArgumentList = "",
+        [string]$WorkingDirectory = ""
+    )
+    $workDir = if ($WorkingDirectory) { (Resolve-Path $WorkingDirectory).Path } else { (Get-Location).Path }
+    $taskName = "AGY_Launch_$(Get-Random)"
+    $actionParams = @{ Execute = $FilePath }
+    if (-not [string]::IsNullOrWhiteSpace($ArgumentList)) {
+        $actionParams['Argument'] = $ArgumentList
+    }
+    if (-not [string]::IsNullOrWhiteSpace($workDir)) {
+        $actionParams['WorkingDirectory'] = $workDir
+    }
+    $action = New-ScheduledTaskAction @actionParams
+    $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
+    $principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive
+    Register-ScheduledTask -TaskName $taskName -Action $action -Settings $settings -Principal $principal -Force | Out-Null
+    Start-ScheduledTask -TaskName $taskName | Out-Null
+    Start-Sleep -Milliseconds 600
+    Unregister-ScheduledTask -TaskName $taskName -Confirm:$false | Out-Null
+}
+
