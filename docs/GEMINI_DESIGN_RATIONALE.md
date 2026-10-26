@@ -39,6 +39,14 @@ Antigravity (AGY) 是定位於 **Staff Software Engineer（資深主任軟體工
   - 核心精神不變：**禁止在同一個點同維度盲目刮痧微調（No Repetitive Micro-Patching）**。
   - 但給予升級路徑：一旦初步假設無效，強制跳脫局部視角，審查環境變數、構建配置、上下游調用等系統邊界。
 
+### 3. 「跨模型注意力落差與 CLI Schema 漂移」的校準 (Flash Attention & CLI Schema Alignment)
+- **歷史教訓**：高階推理模型（如 Gemini 4）具備隱式語意橋接能力，能自動將舊版 IDE 工具名稱（`view_file`、`replace_file_content`、`write_to_file`）映射至 Antigravity CLI 宣告的原生工具（`read_file`、`edit_file`、`write_file`）。然而輕量高速模型（如 Gemini 3.8 Flash）高度依賴 Literal Token Matching 與首位規則錨定（Primacy Bias）：
+  1. 當規則中未明確攔截 `Get-ChildItem`，Flash 首輪預設執行 `Get-ChildItem -Recurse | Select-Object FullName, Length`，導致長路徑觸發 PowerShell 表格寬度截斷（將 `13165` bytes 截斷顯示為 `…65`），進而誤判大檔體積並跳過 `outline` 與切片讀取。
+  2. 在 CLI 非互動式 `pwsh` 管道中，若執行 `rg -n <pattern>` 未帶 `<path>` 參數，`rg` 會因偵測到非 TTY stdin 而無限掛起等待標準輸入。
+- **演進決策**：
+  - **雙環境工具名精準對齊**：於協議與外掛中統一標註 CLI 主代理與子代理工具名稱（`read_file` (`view_file`)、`edit_file` (`replace_file_content`)、`write_file` (`write_to_file`)），消除詞彙落差。
+  - **漏斗探索首位錨定**：於 `rules/cli_toolchain.md` 第一條明確將 `lsj [path]` / `topfiles` 置於目錄探索首位，並將 `Get-ChildItem`、`dir`、`ls`、`tree` 列入明確禁令；同時規範 `rg -n <pattern> <path>` 必填搜尋路徑以杜絕非 TTY 掛起。
+
 ---
 
 ## 🧩 三、四大階段生命週期與邊界決策 (The 4-Phase Lifecycle)
