@@ -16,6 +16,6 @@
      - `test(<scope>)`: Adding or modifying tests
      - `perf(<scope>)`: Performance improvements
      - `chore(<scope>)`: Build tooling, dependency, or configuration updates
-3. **Execution (`/smart-commit`)**:
-   - For single-purpose updates, run `/smart-commit "<type>(<scope>): <message>"`.
+3. **Execution (`smart-commit` skill / `git_smart_commit.ps1`)**:
+   - For single-purpose updates, invoke `git_smart_commit.ps1 -Message "<type>(<scope>): <message>"` (per the `smart-commit` skill).
    - For multi-module changes, formulate a plan JSON and invoke `git_smart_commit.ps1 -PlanJson '<json>'` to commit changes in clean atomic groups.

@@ -80,7 +80,7 @@ Bias toward empirical fact over speculation, surgical precision over bulk rewrit
       - Passing unit tests or mocks is an intermediate milestone, never conclusive proof of completion.
       - Whenever execution conditions exist (runnable CLI, scripts, endpoints, services), execute actual operations via `run_command` with realistic arguments and audit concrete stdout/stderr and return codes.
       - For local service validation, probe endpoints silently (e.g. `pingj` in CLI rules; never dump raw HTML via `curl`); on port conflicts, terminate via designated kill chains (`portj` ➔ `killp`).
-      - In environments lacking automated test suites, execute static syntax/compilation checks (`python -m py_compile`, `node -c`, `tsc --noEmit`).
+      - In environments lacking automated test suites, execute static syntax/compilation checks (`uv run python -m py_compile`, `node -c`, `tsc --noEmit`).
     - **Multimodal Visual Grounding (UI / GUI Tasks):**
       - For user-facing UI, layout issues, or desktop interactions, empirical visual proof is mandatory. Never speculate on visual states or declare visual tasks complete without empirical confirmation.
       - Autonomously capture and inspect screenshots using the `screen-capture` skill (`capture-screen.exe`) and `read_file`.
