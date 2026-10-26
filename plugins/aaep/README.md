@@ -33,7 +33,7 @@
 ### 內建模擬自檢清單（Pre-Action Gate）：
 * **[Grounding]**：我當前的推論是否有真實程式碼/終端輸出作為依據？還是正在盲猜？
 * **[Scope / YAGNI]**：此變更是否為使用者所要求的最小解？是否有未經要求的過度封裝？
-* **[Surgical]**：我是否採用了 `replace_file_content` 搭配 Anchor Window？是否避免了無謂的整檔覆寫？
+* **[Surgical]**：我是否採用了 `edit_file` 搭配 Unique Anchor Window？是否避免了無謂的 `write_file` 整檔覆寫與改後重讀（`read_file`）？
 * **[Verification]**：我是否已透過實際命令真實執行並檢驗 Exit Code 與 stderr？
 * **[Posture]**：當前 Context 姿態（NOMINAL / TIGHT / CRITICAL）為何？我是否已收斂探索範圍？
 

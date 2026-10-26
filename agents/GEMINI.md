@@ -15,12 +15,12 @@ Bias toward empirical fact over speculation, surgical precision over bulk rewrit
       - Anchor every hypothesis in concrete code, configuration, or official documentation. Never speculate on file structures, APIs, or root causes when inspection tools are available.
       - **Judicial Humility:** Never evaluate, critique, or propose deprecating existing tools, functions, or architectural mechanisms without first reading their underlying source code and invocation context. Speculative evaluation without grounding is strictly forbidden.
     - **Progressive Scoping & Funnel Search:**
-      - Search hierarchically using agent-native tooling (e.g., rg, ast-grep, fd, and tools defined in CLI rules): Scope queries to source directories (`src/`, `lib/`) and file patterns. Never run unindexed or unconstrained global scans across build outputs or dependencies (`node_modules/`, `dist/`, `.git/`).
+      - Search hierarchically using agent-native tooling (e.g., `rg -n <pattern> <path>`, `ast-grep -p`, `fd`, and tools defined in CLI rules): Scope queries to explicit source directories (`src/`, `lib/`, or `.`) and file patterns so `rg` never blocks on piped stdin. Never run unindexed or unconstrained global scans across build outputs or dependencies (`node_modules/`, `dist/`, `.git/`).
       - Suppress noise: When a search returns excessive broad matches, immediately increase query specificity (target filenames, symbol prefixes, or exact signatures) rather than paging through voluminous results.
     - **Pre-Flight Size Radar & Large File Handling:**
-      - **Scale Awareness:** Gauge file scale before ingesting—run pre-flight radars (e.g. `topfiles` in CLI rules) on unfamiliar repositories to uncover monolithic files (>20KB / 400+ lines), use compact topology inspection (e.g. `lsj`) without token bloat, or check tool metadata (`Total Lines > 300`).
-      - **Outline Before Ingestion:** For modules >300 lines, extract the structural outline first via `outline <file>` (AST-first with regex fallback, or targeted `rg -n`). Use this structural index to pinpoint target line numbers before reading.
-      - **Surgical Line Slices:** Inspect files using scoped `StartLine` and `EndLine` slices (typically 30-80 lines of context), preserving working memory bandwidth.
+      - **Scale Awareness (`lsj` / `topfiles` First):** Gauge file scale before reading—always use `lsj [path]` (never `Get-ChildItem`/`dir`/`ls`) or `topfiles` to check file byte sizes (`"b" > 10000` bytes ≈ >300 lines) without token bloat.
+      - **Outline Before Ingestion:** Whenever `lsj` shows a module has `"b" > 10000` (>300 lines), NEVER call `read_file` (`view_file`) on the whole file. Extract the structural outline first via `outline <file>` (or targeted `rg -n <pattern> <file>`) to pinpoint target line numbers before reading.
+      - **Surgical Line Slices:** Always pass explicit `StartLine` and `EndLine` parameters (typically 30-80 lines) to `read_file` (`view_file`) when inspecting large modules. Never omit `StartLine`/`EndLine` on files >10KB.
     - **Pragmatic Subagent Delegation (Context Firewall):**
       - **Local Efficiency First:** Keep single-file investigations, symbol tracing, and localized edits in the primary context for rapid, zero-overhead turnaround.
       - **Firewall Delegation:** Proactively dispatch the `research` subagent when investigations require expansive cross-repository audits (>5-10 files), exhaustive log forensics, or heavy external web lookups to shield primary working memory from massive context floods.
@@ -61,13 +61,13 @@ Bias toward empirical fact over speculation, surgical precision over bulk rewrit
     ### 3. Surgical Precision & Contract Integrity
 
     - **Surgical Edits First:**
-      - Always prioritize `replace_file_content` for editing existing source files to preserve surrounding context, comments, and formatting.
-      - Reserve `write_to_file` exclusively for creating brand-new files or authorized full rewrites.
+      - Always prioritize `edit_file` (`replace_file_content`) for editing existing source files to preserve surrounding context, comments, and formatting.
+      - Reserve `write_file` (`write_to_file`) exclusively for creating brand-new files or authorized full rewrites (never clobber existing source modules with full-file overwrites).
     - **Low-Overhead Editing (Anti-Ping-Pong):**
-      - **Anchor Window Principle:** When scoping slices for editing, view the target site plus 15-20 lines of surrounding context once. Capture the complete enclosing block/signature to ensure syntax and bracket balance on the first attempt.
-      - **Zero Redundant Read-backs:** Never invoke `view_file` immediately after a successful `replace_file_content` just to verify text on disk. Trust tool return status and proceed directly to compilation/testing.
-      - **Compiler-Guided Forensics:** When edits cause syntax or type issues, run static checkers (`tsc --noEmit`, `python -m py_compile`, linter) to capture exact line/column coordinates. Surgically patch the cited coordinates rather than re-ingesting the broader file.
-      - **Multi-Site Atomicity:** If a change spans multiple sites within the same file, dispatch all necessary `replace_file_content` operations atomically within the same turn.
+      - **Anchor Window & Target Uniqueness:** When scoping slices for editing, read the target site plus 15-20 lines of surrounding context once via `read_file` (`view_file`). Because `edit_file` replaces every exact match of `Target`, include sufficient unique surrounding anchor lines (enclosing signature or adjacent statements) in `Target` to guarantee a single unambiguous match and balanced brackets on the first attempt. (On Windows, if `edit_file` reports target not found despite exact visible text, normalize `\r\n` to `\n` once rather than repeating blind retries).
+      - **Zero Redundant Read-backs:** Never invoke `read_file` (`view_file`) after a successful `edit_file` (`replace_file_content`)—neither immediately nor before final reporting—just to re-verify text on disk. Trust tool return status and line coordinates, and proceed directly to compilation/testing.
+      - **Compiler-Guided Forensics:** When edits cause syntax or type issues, run static checkers (`uv run python -m py_compile`, `uvx ruff check`, `tsc --noEmit`, linter) to capture exact line/column coordinates. Surgically patch the cited coordinates via `edit_file` rather than re-ingesting the broader file.
+      - **Multi-Site Atomicity:** If a change spans multiple non-adjacent sites within the same file or across files, dispatch all necessary `edit_file` operations atomically within the same turn.
     - **Contract & Caller Integrity:**
       - Before altering any public function signature, interface, or component prop, audit all call sites across the codebase.
       - Update definitions and call sites atomically within the same turn to ensure zero runtime mismatches.
@@ -84,7 +84,7 @@ Bias toward empirical fact over speculation, surgical precision over bulk rewrit
       - In environments lacking automated test suites, execute static syntax/compilation checks (`python -m py_compile`, `node -c`, `tsc --noEmit`).
     - **Multimodal Visual Grounding (UI / GUI Tasks):**
       - For user-facing UI, layout issues, or desktop interactions, empirical visual proof is mandatory. Never speculate on visual states or declare visual tasks complete without empirical confirmation.
-      - Autonomously capture and inspect screenshots using the `screen-capture` skill (`capture-screen.exe`) and `view_file`.
+      - Autonomously capture and inspect screenshots using the `screen-capture` skill (`capture-screen.exe`) and `read_file`.
       - For desktop applications requiring interactive desktop session rendering or user-assisted snip debugging, strictly follow the execution protocols defined in the `screen-capture` skill.
     - **Hypothesis Escalation (Anti-Looping):**
       - **Stop Repetitive Micro-Patching:** Never attempt repeated micro-tweaks (blind `try/catch` wrapping, identical null guards, or trial-and-error syntax changes) targeting the same failure.

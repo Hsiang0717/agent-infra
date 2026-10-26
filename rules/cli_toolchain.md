@@ -10,13 +10,15 @@ description: "Enforce Windows pwsh environment and agent-native CLI tools (ast-g
   - Always use PowerShell syntax: `$env:VAR = "value"`, `Get-Command` (never Bash idioms like `export` or `which`).
 
 - **Inspection & Search Hierarchy (Native Tools First):**
-  - **File Reading:** Always prefer native `view_file` tool with scoped `StartLine` and `EndLine` slices. Never run raw dump commands (`cat`, `type`, `Get-Content`).
-  - **File Discovery:** Use native `fd [pattern]` (auto-ignores `.git`/`node_modules`).
+  - **Directory & Scale Discovery:** Always use `lsj [path]` (compact JSON with exact byte size `"b"`) or `topfiles [count] [path]` to inspect directory topology and file sizes, or `fd [pattern]` for file search (auto-ignores `.git`/`node_modules`). Never run raw shell listing commands (`Get-ChildItem`, `dir`, `ls`, `tree`), which bloat tokens and truncate columns.
+  - **File Reading & Pre-Read Outline Gate:**
+    - Always use native `read_file` (`view_file`) tool with explicit `StartLine` and `EndLine` slices (30-80 lines). Never run raw shell dump commands (`cat`, `type`, `Get-Content`).
+    - **Mandatory Outline Gate (>300 lines / `"b" > 10000` in `lsj`):** NEVER call unbounded `read_file` (`view_file`) without `StartLine` and `EndLine` on large files. You MUST run `outline <file>` (or `rg -n <pattern> <file>`) FIRST to get exact line coordinates, then read only the targeted slice.
   - **Code Search & Structural Precision (Funnel Protocol):**
     - **Selection Rules:**
-      - Plain text, error messages, logs, or non-code files (`.env`, `.json`, `.md`): Use `rg -n [pattern]`.
+      - Plain text, error messages, logs, or non-code files (`.env`, `.json`, `.md`): Use `rg -n <pattern> <path>` (always provide an explicit `<path>` such as `src/` or `.` so `rg` never blocks waiting on non-TTY piped stdin).
       - Code syntax (function/method calls, destructuring, decorators): MUST use `ast-grep -p` (never attempt multi-line regex in `rg`).
-      - Unknown monolithic files (>300 lines): NEVER inspect raw slices blindly; MUST run `outline <file>` first to obtain the structural index before reading.
+      - Unknown monolithic files (>300 lines / `"b" > 10000` in `lsj`): NEVER inspect raw slices blindly or call unbounded `read_file` (`view_file`); MUST run `outline <file>` first to obtain the structural index before reading with `StartLine` and `EndLine`.
     - **ast-grep Quick Recipes:**
       - Method/function calls: `ast-grep -p '$OBJ.myMethod($$$ARGS)'`
       - Arbitrary destructuring: `ast-grep -p 'const { $$$PRE, targetKey, $$$POST } = $OBJ'`

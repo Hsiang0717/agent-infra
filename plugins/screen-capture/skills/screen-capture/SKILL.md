@@ -7,7 +7,7 @@ description: Unified AI-native screen capture utility for autonomous UI verifica
 
 AI-native screen capture tool powered by a high-performance standalone Rust binary (`capture-screen.exe`). Provides two operational modes:
 
-1. **Mode A: Autonomous Verification (Agent-Driven)**: Direct DirectX / Windows.Graphics.Capture of running applications and browser windows for closed-loop visual checks via `view_file`.
+1. **Mode A: Autonomous Verification (Agent-Driven)**: Direct DirectX / Windows.Graphics.Capture of running applications and browser windows for closed-loop visual checks via `read_file`.
 2. **Mode B: Collaborative Interactive Snip (Human-in-the-Loop)**: Seamlessly triggers Windows Snipping Tool via `--snip`, captures user-selected areas (including pen/color markups), and streams observations directly into the multimodal conversation.
 
 ---
@@ -40,9 +40,9 @@ Used autonomously by the agent to visually inspect UI changes, layout fidelity, 
 <bin>/capture-screen.exe --fullscreen --out "scratch/fullscreen.png"
 ```
 
-### Visual Grounding with `view_file`:
+### Visual Grounding with `read_file`:
 ```
-view_file(AbsolutePath="<workspace>/scratch/ui.png")
+read_file(Path="<workspace>/scratch/ui.png")
 ```
 - Audit visual layout, padding, font rendering, colors, and responsive wrapping.
 
@@ -71,9 +71,9 @@ Used when:
 - The user selects the target region, marks details with pen/highlighter tools, clicks Copy, and closes the Snipping Tool window (`X`).
 - The binary monitors window lifecycle: closing the window serves as the definitive completion signal, instantly extracting and saving the annotated image.
 
-### 2. Inspect Screenshot via `view_file`
+### 2. Inspect Screenshot via `read_file`
 ```
-view_file(AbsolutePath="<workspace>/scratch/user_snip.png")
+read_file(Path="<workspace>/scratch/user_snip.png")
 ```
 - Identify marked-up colors, callouts, arrows, and target UI components.
 
