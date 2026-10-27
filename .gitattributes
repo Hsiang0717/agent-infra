@@ -1,12 +1,20 @@
 # Enforce LF endings across all platforms
 * text=auto eol=lf
 
-# Explicitly enforce LF on all shell scripts and node executables
+# Explicitly enforce LF on all shell scripts, PowerShell, code and docs
 *.sh text eol=lf
+*.ps1 text eol=lf
+*.psm1 text eol=lf
+*.psd1 text eol=lf
 *.cjs text eol=lf
 *.js text eol=lf
 *.ts text eol=lf
+*.rs text eol=lf
+*.py text eol=lf
+*.toml text eol=lf
 *.json text eol=lf
+*.yaml text eol=lf
+*.yml text eol=lf
 *.md text eol=lf
 
 # Windows batch files must use CRLF
