@@ -372,7 +372,7 @@ pub fn probe_transcript_tokens(path: &Path) -> (u64, u64) {
     (0, 0)
 }
 
-// ─── PreToolUse CRLF Auto-Normalizer ────────────────────────────────────────
+// ─── PreToolUse CRLF & BOM Auto-Normalizer ───────────────────────────────────
 
 pub fn normalize_file_crlf_if_needed(path: &Path) -> bool {
     if !path.is_file() {
@@ -390,8 +390,15 @@ pub fn normalize_file_crlf_if_needed(path: &Path) -> bool {
         Err(_) => return false,
     };
 
-    // Skip binary files or files without CRLF
-    if bytes.contains(&0) || !bytes.windows(2).any(|w| w == b"\r\n") {
+    // Skip binary files (containing null bytes)
+    if bytes.contains(&0) {
+        return false;
+    }
+
+    let has_crlf = bytes.windows(2).any(|w| w == b"\r\n");
+    let has_bom = bytes.starts_with(&[0xEF, 0xBB, 0xBF]);
+
+    if !has_crlf && !has_bom {
         return false;
     }
 
@@ -400,7 +407,8 @@ pub fn normalize_file_crlf_if_needed(path: &Path) -> bool {
         Err(_) => return false,
     };
 
-    let normalized = text.replace("\r\n", "\n");
+    let cleaned = text.trim_start_matches('\u{feff}');
+    let normalized = cleaned.replace("\r\n", "\n");
     std::fs::write(path, normalized.as_bytes()).is_ok()
 }
 
@@ -415,6 +423,12 @@ fn handle_pre_edit_hook(explicit_file: Option<&str>) {
     if io::stdin().read_to_string(&mut raw_stdin).is_ok() {
         let cleaned = raw_stdin.trim().trim_start_matches('\u{feff}');
         if let Ok(val) = serde_json::from_str::<serde_json::Value>(cleaned) {
+            let workspace_root = val
+                .get("workspacePaths")
+                .and_then(|v| v.as_array())
+                .and_then(|arr| arr.first())
+                .and_then(|v| v.as_str());
+
             if let Some(args) = val.get("toolCall").and_then(|tc| tc.get("args")) {
                 let path_opt = args
                     .get("Path")
@@ -422,7 +436,15 @@ fn handle_pre_edit_hook(explicit_file: Option<&str>) {
                     .or_else(|| args.get("path"))
                     .and_then(|v| v.as_str());
                 if let Some(p) = path_opt {
-                    normalize_file_crlf_if_needed(Path::new(p));
+                    let target_path = Path::new(p);
+                    let full_path = if target_path.is_absolute() {
+                        target_path.to_path_buf()
+                    } else if let Some(ws) = workspace_root {
+                        Path::new(ws).join(target_path)
+                    } else {
+                        target_path.to_path_buf()
+                    };
+                    normalize_file_crlf_if_needed(&full_path);
                 }
             }
         }
@@ -644,9 +666,14 @@ mod tests {
         let temp_dir = std::env::temp_dir();
         let toml_file = temp_dir.join(format!("test_crlf_{}.toml", std::process::id()));
         let bat_file = temp_dir.join(format!("test_crlf_{}.bat", std::process::id()));
+        let bom_file = temp_dir.join(format!("test_bom_{}.txt", std::process::id()));
 
         std::fs::write(&toml_file, "a = 1\r\nb = 2\r\n").unwrap();
         std::fs::write(&bat_file, "@echo off\r\necho hi\r\n").unwrap();
+        // UTF-8 BOM + CRLF
+        let mut bom_bytes = vec![0xEF, 0xBB, 0xBF];
+        bom_bytes.extend_from_slice("hello\r\nworld\r\n".as_bytes());
+        std::fs::write(&bom_file, &bom_bytes).unwrap();
 
         assert!(normalize_file_crlf_if_needed(&toml_file));
         assert_eq!(std::fs::read_to_string(&toml_file).unwrap(), "a = 1\nb = 2\n");
@@ -657,7 +684,14 @@ mod tests {
         assert!(!normalize_file_crlf_if_needed(&bat_file));
         assert_eq!(std::fs::read_to_string(&bat_file).unwrap(), "@echo off\r\necho hi\r\n");
 
+        // BOM file must be stripped of BOM and normalized to LF
+        assert!(normalize_file_crlf_if_needed(&bom_file));
+        let bom_content = std::fs::read(&bom_file).unwrap();
+        assert!(!bom_content.starts_with(&[0xEF, 0xBB, 0xBF]));
+        assert_eq!(std::str::from_utf8(&bom_content).unwrap(), "hello\nworld\n");
+
         let _ = std::fs::remove_file(&toml_file);
         let _ = std::fs::remove_file(&bat_file);
+        let _ = std::fs::remove_file(&bom_file);
     }
 }
