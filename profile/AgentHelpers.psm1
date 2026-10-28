@@ -13,52 +13,56 @@ function outline {
     $resolved = (Resolve-Path -LiteralPath $File -ErrorAction Stop).Path
     $ext = [System.IO.Path]::GetExtension($resolved).ToLowerInvariant()
 
-    switch ($ext) {
+    $caseInsensitive = $false
+    $p = switch ($ext) {
         # 1. Markdown / 文件綱要 (提取標題 #, ##, ###, ####)
         { $_ -in '.md', '.markdown', '.mdown', '.mkd' } {
-            rg -n '^\s*#{1,4}\s+' $resolved
+            '^\s*#{1,4}\s+'
         }
         # 2. TypeScript / JavaScript / JSX / TSX (支援 function, 箭頭函式, Class 方法, type/interface)
         { $_ -in '.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs' } {
-            $p = '^\s*(export\s+(default\s+)?)?((async\s+)?function\b|(const|let|var)\s+\w+\s*=\s*(async\s+)?(\([^)]*\)|[a-zA-Z0-9_$]+)\s*=>|(class|interface|type|enum)\b|(public|private|protected|static|async|override|get|set)\s+(\w+)\s*\([^)]*\)\s*[:{])'
-            rg -n $p $resolved
+            '^\s*(export\s+(default\s+)?)?((async\s+)?function\b|(const|let|var)\s+\w+\s*=\s*(async\s+)?(\([^)]*\)|[a-zA-Z0-9_$]+)\s*=>|(class|interface|type|enum)\b|(public|private|protected|static|async|override|get|set)\s+(\w+)\s*\([^)]*\)\s*[:{])'
         }
         # 3. Python (捕捉 class 與 def，保留縮排結構)
         { $_ -in '.py', '.pyi' } {
-            rg -n '^\s*(async\s+)?(def|class)\b' $resolved
+            '^\s*(async\s+)?(def|class)\b'
         }
         # 4. Rust (fn, struct, enum, trait, impl, mod, type, macro_rules!)
         { $_ -in '.rs' } {
-            $p = '^\s*(pub(\([^)]+\))?\s+)?(async\s+)?(fn|struct|enum|trait|impl|mod|type|macro_rules!)\b'
-            rg -n $p $resolved
+            '^\s*(pub(\([^)]+\))?\s+)?(async\s+)?(fn|struct|enum|trait|impl|mod|type|macro_rules!)\b'
         }
         # 5. C# / Java / Kotlin / Swift / Scala
         { $_ -in '.cs', '.java', '.kt', '.swift', '.scala' } {
-            $p = '^\s*(public|protected|private|static|async|override|virtual|final|abstract|class|interface|record|enum|fun|func)\b'
-            rg -n $p $resolved
+            '^\s*(public|protected|private|static|async|override|virtual|final|abstract|class|interface|record|enum|fun|func)\b'
         }
         # 6. Go (func, type)
         { $_ -in '.go' } {
-            rg -n '^\s*(func(\s+\([^)]+\))?|type)\s+\w+' $resolved
+            '^\s*(func(\s+\([^)]+\))?|type)\s+\w+'
         }
         # 7. C / C++ / Header
         { $_ -in '.c', '.cpp', '.cxx', '.cc', '.h', '.hpp' } {
-            $p = '^\s*(((class|struct|enum|union|namespace)\s+\w+)|((inline|static|virtual|explicit|friend|constexpr)\s+)*[\w:<>&*]+\s+\w+\s*\([^;]*\)\s*(\{|const|\/\/))'
-            rg -n $p $resolved
+            '^\s*(((class|struct|enum|union|namespace)\s+\w+)|((inline|static|virtual|explicit|friend|constexpr)\s+)*[\w:<>&*]+\s+\w+\s*\([^;]*\)\s*(\{|const|\/\/))'
         }
         # 8. SQL
         { $_ -in '.sql' } {
-            rg -n -i '^\s*create\s+(or\s+replace\s+)?(table|view|procedure|function|trigger|index)\b' $resolved
+            $caseInsensitive = $true
+            '^\s*create\s+(or\s+replace\s+)?(table|view|procedure|function|trigger|index)\b'
         }
         # 9. PowerShell
         { $_ -in '.ps1', '.psm1' } {
-            rg -n '^\s*(function|filter|configuration|class|enum)\s+\w+' $resolved
+            '^\s*(function|filter|configuration|class|enum)\s+\w+'
         }
         # 通用 Fallback (經典多語言正規式)
         default {
-            $p = '^\s*(@\w+|(export|default|pub(\([^)]+\))?|async|public|private|protected|static|final|abstract|override)\s+)*(fn|func|function|def|class|interface|type|struct|enum|impl|trait|mod)\b'
-            rg -n $p $resolved
+            '^\s*(@\w+|(export|default|pub(\([^)]+\))?|async|public|private|protected|static|final|abstract|override)\s+)*(fn|func|function|def|class|interface|type|struct|enum|impl|trait|mod)\b'
         }
+    }
+
+    # 輸出格式嚴格對齊原生 read_file ("{LineNumber}: {Content}")
+    if ($caseInsensitive) {
+        rg -n --field-match-separator ": " -i $p $resolved
+    } else {
+        rg -n --field-match-separator ": " $p $resolved
     }
 }
 

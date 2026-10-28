@@ -46,7 +46,7 @@ winget install --id BurntSushi.ripgrep.MSVC sharkdp.fd jqlang.jq astral-sh.uv --
 * `git status -s`：極簡版控狀態清單（比 JSON 化更精簡且零錯誤）。
 
 ### B. Agent-Native 專屬 Helper (防爆、複合、降級)
-* `outline <file>`：提取結構大綱（高速多語言宣告與裝飾器索引 `rg -n`）。
+* `outline <file>`：提取結構大綱（高速多語言語法索引，輸出格式嚴格對齊原生 `read_file` 之 `"{Line}: {Content}"`）。
 * `lsj [path]`：目錄壓縮清單，回傳標準 JSON Array (`[{"n":"file.ts","t":"f","b":1024}]`)。
 * `topj [count] [path]`：大檔案雷達，事前規模感知防範讀檔 Token 爆炸。
 * `pingj [url]`：本機 HTTP 伺服器探針，回傳 `{"ok":true,"code":200}`，防範 HTML 頁面噴發。
