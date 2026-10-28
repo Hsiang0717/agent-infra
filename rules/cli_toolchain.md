@@ -17,7 +17,7 @@ description: "Enforce Windows pwsh environment and agent-native CLI tools (rg, f
   - **3. Code Search & Structural Precision (Funnel Protocol):**
     - Use `rg -n <pattern> <path>` for fast, targeted code and text searches (always pass an explicit `<path>` such as `src/` or `.` so `rg` never blocks waiting on non-TTY piped stdin). Suppress noise by narrowing query terms or scoping to specific subdirectories.
   - **4. File Editing & Windows Line-Ending Hygiene:**
-    - Use `edit_file` for surgical replacements and `write_file` only for new files or full rewrites. Always copy `Target` verbatim from a single contiguous `read_file` slice covering that region (never guess unread imports or surrounding lines to save a read), stripping all tool display prefixes (such as line numbers `12: `, `13: ` from `read_file` or `rg -n`). If `edit_file` reports target not found on a Windows file despite exact visible text, run `lf <file>` once to normalize `\r\n` to `\n` rather than repeating blind retries.
+    - Use `edit_file` for surgical replacements and `write_file` only for new files or full rewrites. Always copy `Target` verbatim from a contiguous read slice covering that region, omitting the standard line prefix (`12: `) shared by `read_file` and `outline`. If `edit_file` reports target not found on a Windows file despite exact visible text, run `lf <file>` once to normalize `\r\n` to `\n` rather than repeating blind retries.
   - **5. VCS Status:** Use native `git status -s` (minimal 2-char status prefix).
 
 - **Agent-Native CLI Helpers (Essential pwsh extensions):**
