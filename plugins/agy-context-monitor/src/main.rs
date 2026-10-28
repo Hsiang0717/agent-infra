@@ -462,6 +462,73 @@ fn strip_line_number_prefixes(text: &str) -> (String, bool) {
     (result, modified)
 }
 
+fn find_unique_blank_line_tolerant_match(candidate_target: &str, file_content: &str) -> Option<String> {
+    let norm_target = candidate_target.replace("\r\n", "\n");
+    let norm_content = file_content.replace("\r\n", "\n");
+
+    let target_lines: Vec<&str> = norm_target.split('\n').collect();
+    let target_meaningful: Vec<&str> = target_lines
+        .iter()
+        .map(|l| l.trim_end())
+        .filter(|l| !l.trim().is_empty())
+        .collect();
+
+    // Guard: require at least 2 non-blank lines to avoid ambiguous matching on single statements
+    if target_meaningful.len() < 2 {
+        return None;
+    }
+
+    let file_lines: Vec<&str> = norm_content.split('\n').collect();
+    let mut matches = Vec::new();
+
+    let n_meaningful = target_meaningful.len();
+    for start_idx in 0..file_lines.len() {
+        if file_lines[start_idx].trim().is_empty() {
+            continue;
+        }
+        if file_lines[start_idx].trim_end() != target_meaningful[0] {
+            continue;
+        }
+
+        let mut meaningful_idx = 1;
+        let mut end_idx = start_idx;
+        for curr_idx in (start_idx + 1)..file_lines.len() {
+            let line = file_lines[curr_idx];
+            if line.trim().is_empty() {
+                continue;
+            }
+            if line.trim_end() == target_meaningful[meaningful_idx] {
+                meaningful_idx += 1;
+                end_idx = curr_idx;
+                if meaningful_idx == n_meaningful {
+                    break;
+                }
+            } else {
+                break;
+            }
+        }
+
+        if meaningful_idx == n_meaningful {
+            matches.push((start_idx, end_idx));
+            if matches.len() > 1 {
+                return None;
+            }
+        }
+    }
+
+    if matches.len() == 1 {
+        let (start, end) = matches[0];
+        let matched_slice = file_lines[start..=end].join("\n");
+        if file_content.contains("\r\n") {
+            Some(matched_slice.replace('\n', "\r\n"))
+        } else {
+            Some(matched_slice)
+        }
+    } else {
+        None
+    }
+}
+
 fn sanitize_edit_target(raw_target: &str, file_content: &str) -> Option<String> {
     if raw_target.is_empty() {
         return None;
@@ -476,23 +543,28 @@ fn sanitize_edit_target(raw_target: &str, file_content: &str) -> Option<String> 
         return None;
     }
 
-    // 2. Strip line prefixes
+    // 2. Strip line prefixes if present
     let (cleaned, modified) = strip_line_number_prefixes(raw_target);
-    if !modified {
-        return None;
+    let candidate = if modified {
+        let norm_cleaned = cleaned.replace("\r\n", "\n");
+        if norm_content.contains(&norm_cleaned) {
+            if file_content.contains("\r\n") && !cleaned.contains("\r\n") {
+                return Some(cleaned.replace('\n', "\r\n"));
+            } else {
+                return Some(cleaned);
+            }
+        }
+        cleaned
+    } else {
+        raw_target.to_string()
+    };
+
+    // 3. Blank-line & whitespace-tolerant alignment
+    if let Some(aligned) = find_unique_blank_line_tolerant_match(&candidate, file_content) {
+        return Some(aligned);
     }
 
-    // 3. Double check: does cleaned target actually match the file?
-    let norm_cleaned = cleaned.replace("\r\n", "\n");
-    if norm_content.contains(&norm_cleaned) {
-        if file_content.contains("\r\n") && !cleaned.contains("\r\n") {
-            Some(cleaned.replace('\n', "\r\n"))
-        } else {
-            Some(cleaned)
-        }
-    } else {
-        None
-    }
+    None
 }
 
 fn sanitize_replacement_if_dirty(raw_replacement: &str) -> Option<String> {
@@ -879,5 +951,45 @@ mod tests {
 
         let clean_rep = "    let a = 100;\n    let b = 200;";
         assert_eq!(sanitize_replacement_if_dirty(clean_rep), None);
+    }
+
+    #[test]
+    fn test_sanitize_edit_target_blank_line_gap_in_file() {
+        let file_content = "import json\n\nfrom fastapi import APIRouter\nfrom fastapi.responses import StreamingResponse\n";
+        let missing_blank_target = "import json\nfrom fastapi import APIRouter\nfrom fastapi.responses import StreamingResponse";
+        let aligned = sanitize_edit_target(missing_blank_target, file_content);
+        assert_eq!(
+            aligned,
+            Some("import json\n\nfrom fastapi import APIRouter\nfrom fastapi.responses import StreamingResponse".to_string())
+        );
+    }
+
+    #[test]
+    fn test_sanitize_edit_target_blank_line_gap_in_target() {
+        let file_content = "import json\nfrom fastapi import APIRouter\n";
+        let extra_blank_target = "import json\n\nfrom fastapi import APIRouter";
+        let aligned = sanitize_edit_target(extra_blank_target, file_content);
+        assert_eq!(
+            aligned,
+            Some("import json\nfrom fastapi import APIRouter".to_string())
+        );
+    }
+
+    #[test]
+    fn test_sanitize_edit_target_multiple_blank_gaps_ambiguous() {
+        let file_content = "def foo():\n    let a = 1;\n\n    let b = 2;\n\ndef bar():\n    let a = 1;\n\n    let b = 2;\n";
+        let target = "    let a = 1;\n    let b = 2;";
+        assert_eq!(sanitize_edit_target(target, file_content), None);
+    }
+
+    #[test]
+    fn test_sanitize_edit_target_crlf_blank_line_tolerance() {
+        let file_content = "import json\r\n\r\nfrom fastapi import APIRouter\r\n";
+        let target = "import json\nfrom fastapi import APIRouter";
+        let aligned = sanitize_edit_target(target, file_content);
+        assert_eq!(
+            aligned,
+            Some("import json\r\n\r\nfrom fastapi import APIRouter".to_string())
+        );
     }
 }
