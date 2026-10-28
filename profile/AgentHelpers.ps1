@@ -6,11 +6,60 @@
 # 或由系統 PowerShell Profile ($PROFILE) 自動載入。
 # =====================================================================
 
-# 1. 結構大綱提取 (高速多語言宣告與裝飾器索引)
+# 1. 結構大綱提取 (副檔名感知之多語言結構、類別、函式與標題索引)
 function outline {
-    param([Parameter(Mandatory=$true)][string]$File)
-    $pattern = '^\s*(@\w+|(export|default|pub(\([^)]+\))?|async|public|private|protected|static|final|abstract|override)\s+)*(fn|func|function|def|class|interface|type|struct|enum|impl|trait|mod)\b'
-    rg -n $pattern $File
+    param([Parameter(Mandatory=$true, ValueFromPipeline=$true)][string]$File)
+    
+    $resolved = (Resolve-Path -LiteralPath $File -ErrorAction Stop).Path
+    $ext = [System.IO.Path]::GetExtension($resolved).ToLowerInvariant()
+
+    switch ($ext) {
+        # 1. Markdown / 文件綱要 (提取標題 #, ##, ###, ####)
+        { $_ -in '.md', '.markdown', '.mdown', '.mkd' } {
+            rg -n '^\s*#{1,4}\s+' $resolved
+        }
+        # 2. TypeScript / JavaScript / JSX / TSX (支援 function, 箭頭函式, Class 方法, type/interface)
+        { $_ -in '.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs' } {
+            $p = '^\s*(export\s+(default\s+)?)?((async\s+)?function\b|(const|let|var)\s+\w+\s*=\s*(async\s+)?(\([^)]*\)|[a-zA-Z0-9_$]+)\s*=>|(class|interface|type|enum)\b|(public|private|protected|static|async|override|get|set)\s+(\w+)\s*\([^)]*\)\s*[:{])'
+            rg -n $p $resolved
+        }
+        # 3. Python (捕捉 class 與 def，保留縮排結構)
+        { $_ -in '.py', '.pyi' } {
+            rg -n '^\s*(async\s+)?(def|class)\b' $resolved
+        }
+        # 4. Rust (fn, struct, enum, trait, impl, mod, type, macro_rules!)
+        { $_ -in '.rs' } {
+            $p = '^\s*(pub(\([^)]+\))?\s+)?(async\s+)?(fn|struct|enum|trait|impl|mod|type|macro_rules!)\b'
+            rg -n $p $resolved
+        }
+        # 5. C# / Java / Kotlin / Swift / Scala
+        { $_ -in '.cs', '.java', '.kt', '.swift', '.scala' } {
+            $p = '^\s*(public|protected|private|static|async|override|virtual|final|abstract|class|interface|record|enum|fun|func)\b'
+            rg -n $p $resolved
+        }
+        # 6. Go (func, type)
+        { $_ -in '.go' } {
+            rg -n '^\s*(func(\s+\([^)]+\))?|type)\s+\w+' $resolved
+        }
+        # 7. C / C++ / Header
+        { $_ -in '.c', '.cpp', '.cxx', '.cc', '.h', '.hpp' } {
+            $p = '^\s*(((class|struct|enum|union|namespace)\s+\w+)|((inline|static|virtual|explicit|friend|constexpr)\s+)*[\w:<>&*]+\s+\w+\s*\([^;]*\)\s*(\{|const|\/\/))'
+            rg -n $p $resolved
+        }
+        # 8. SQL
+        { $_ -in '.sql' } {
+            rg -n -i '^\s*create\s+(or\s+replace\s+)?(table|view|procedure|function|trigger|index)\b' $resolved
+        }
+        # 9. PowerShell
+        { $_ -in '.ps1', '.psm1' } {
+            rg -n '^\s*(function|filter|configuration|class|enum)\s+\w+' $resolved
+        }
+        # 通用 Fallback (經典多語言正規式)
+        default {
+            $p = '^\s*(@\w+|(export|default|pub(\([^)]+\))?|async|public|private|protected|static|final|abstract|override)\s+)*(fn|func|function|def|class|interface|type|struct|enum|impl|trait|mod)\b'
+            rg -n $p $resolved
+        }
+    }
 }
 
 # 2. 壓縮目錄清單 (解決 Get-ChildItem 肥大表格，保證輸出 Array，短鍵名 n, t, b)
