@@ -193,18 +193,6 @@ function start-gui {
     Unregister-ScheduledTask -TaskName $taskName -Confirm:$false | Out-Null
 }
 
-# 9. 正規化檔案換行符號為純 LF (無 BOM UTF-8)，徹底消除 Windows CRLF 對 edit_file 的干擾
-function lf {
-    param([Parameter(Mandatory=$true, ValueFromPipeline=$true)][string[]]$Path)
-    process {
-        foreach ($p in $Path) {
-            $resolved = (Resolve-Path -LiteralPath $p -ErrorAction Stop).Path
-            $raw = [System.IO.File]::ReadAllText($resolved)
-            if ($raw.Contains("`r`n")) {
-                [System.IO.File]::WriteAllText($resolved, $raw.Replace("`r`n", "`n"), (New-Object System.Text.UTF8Encoding($false)))
-            }
-        }
-    }
-}
+
 
 
