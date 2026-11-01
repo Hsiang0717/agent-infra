@@ -16,8 +16,9 @@ description: "Enforce Windows pwsh environment and agent-native CLI tools (rg, f
     - For modules >300 lines (`"b" > 10000` in `lsj`), never call unbounded `read_file` on the whole file: run `outline <file>` (or `rg -n <pattern> <file>`) first to pinpoint exact line coordinates, then read only the targeted slice.
   - **3. Code Search & Structural Precision (Funnel Protocol):**
     - Use `rg -n <pattern> <path>` for fast, targeted code and text searches (always pass an explicit `<path>` such as `src/` or `.` so `rg` never blocks waiting on non-TTY piped stdin). Suppress noise by narrowing query terms or scoping to specific subdirectories.
-  - **4. Surgical File Editing Protocol:**
-    - Use `edit_file` for surgical replacements and `write_file` only for new files or full rewrites. Always copy `Target` verbatim from a contiguous read slice covering that region, omitting the standard line prefix (`12: `) shared by `read_file` and `outline`.
+  - **4. Surgical File Editing Protocol (Minimal Unique Target):**
+    - Use `edit_file` for surgical replacements and `write_file` only for new files or full rewrites.
+    - **Micro-Anchoring:** Copy `Target` verbatim from a fresh read slice, but keep `Target` strictly scoped to the minimal unique context needed (e.g. enclosing signature or distinct statement). Avoid bloated multi-statement targets to eliminate whitespace/drift mismatch risks.
   - **5. VCS Status:** Use native `git status -s` (minimal 2-char status prefix).
 
 - **Agent-Native CLI Helpers (Essential pwsh extensions):**
