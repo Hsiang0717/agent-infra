@@ -18,7 +18,7 @@ description: "Enforce Windows pwsh environment and agent-native CLI tools (rg, f
     - Use `rg -n <pattern> <path>` for fast, targeted code and text searches (always pass an explicit `<path>` such as `src/` or `.` so `rg` never blocks waiting on non-TTY piped stdin). Suppress noise by narrowing query terms or scoping to specific subdirectories.
   - **4. Surgical File Editing Protocol (Minimal Unique Target):**
     - Use `edit_file` for surgical replacements and `write_file` only for new files or full rewrites.
-    - **Micro-Anchoring:** Copy `Target` verbatim from a fresh read slice, but keep `Target` strictly scoped to the minimal unique context needed (e.g. enclosing signature or distinct statement). Avoid bloated multi-statement targets to eliminate whitespace/drift mismatch risks.
+    - **Micro-Anchoring:** Copy `Target` verbatim from a fresh read slice strictly within read boundaries. Keep `Target` scoped to the minimal unique context needed (enclosing signature/condition). Because `edit_file` replaces all occurrences, never target generic repeated statements or bare whitespace alone. Avoid bloated multi-statement targets to eliminate whitespace/drift mismatch risks.
   - **5. VCS Status:** Use native `git status -s` (minimal 2-char status prefix).
 
 - **Agent-Native CLI Helpers (Essential pwsh extensions):**
