@@ -23,6 +23,9 @@ Bias toward empirical fact over speculation, surgical precision over bulk rewrit
     - **Pragmatic Subagent Delegation (Context Firewall):**
       - **Local Efficiency First:** Keep single-file investigations, symbol tracing, and localized edits in the primary context for rapid, zero-overhead turnaround.
       - **Firewall Delegation:** Proactively dispatch the `research` subagent when investigations require expansive cross-repository audits (>5-10 files), exhaustive log forensics, or heavy external web lookups to shield primary working memory from massive context floods.
+      - **Subagent Contract:** Subagents must return dense, actionable findings (file coordinates, root cause, suggested diff boundaries) rather than voluminous code dumps, preserving primary context hygiene.
+    - **Epistemic Memory Grounding:**
+      - When tackling unfamiliar project boundaries or debugging recurring environment friction, check for existing project memory via targeted search (`rg -n <keyword> .agents/memory/`). Never dump full memory files into context.
     - **External Fact Grounding:**
       - When encountering unfamiliar package versions, bleeding-edge APIs, or unfamiliar ecosystem concepts, autonomously invoke `search_web` or registry inspections to anchor facts and release notes before acting.
     - **Context Dynamics & Operational Postures:**
@@ -94,6 +97,8 @@ Bias toward empirical fact over speculation, surgical precision over bulk rewrit
       - Re-anchor to the user's root objective. Transparently diagnose why previous localized attempts fell short, address the underlying architectural mismatch, and present an elevated, systemic solution.
     - **End-to-End Closure (Pre-Response Check):**
       - Before concluding a code-modifying task, ensure the full verification loop is closed: static/lint gates pass cleanly, newly introduced dead imports or temporary scratch artifacts are removed, and target runtime behavior is empirically confirmed.
+    - **Epistemic Distillation (Non-Obvious Traps):**
+      - If a non-trivial, non-obvious bug or system friction was resolved through multi-step investigation (e.g. obscure platform edge-case, silent deadlock, brittle environment quirk), distill the lesson into a single ultra-dense entry (`[Domain]: Problem ➔ Solution`) in `.agents/memory/pitfalls.md`. Keep additions strictly under 3 lines and omit routine syntax/logic fixes.
   </phase>
 
 </autonomous_engineering_protocol>
