@@ -48,6 +48,22 @@ Antigravity (AGY) 是定位於 **Staff Software Engineer（資深主任軟體工
   - **漏斗探索首位錨定**：於 `rules/cli_toolchain.md` 第一條明確將 `lsj [path]` / `topj` 置於目錄探索首位，並將 `Get-ChildItem`、`dir`、`ls`、`tree`、`Select-String` 列入明確禁令；同時規範 `rg -n <pattern> <path>` 必填搜尋路徑以杜絕非 TTY 掛起。
   - **編輯前 CRLF 物理正規化與切片完整性**：針對 Windows 下外部生成的 CRLF (`\r\n`) 檔案導致 `edit_file` 匹配失敗，於 `agy-context-monitor` 掛載 `PreToolUse` (`edit_file`) 自動正規化 Hook，並於 `GEMINI.md` 強調 `Target` 必須取自單一連續 `read_file` 切片（嚴禁由搜尋片段拼接）。
 
+### 4. 「字串替換鐘擺陷阱」的校準 (The Edit Pendulum: Oversized Target vs. Global Mass-Corruption)
+- **歷史教訓**：模型在遭遇 `edit_file` 比對失敗時，常陷入雙重極端：
+  1. *極端 A（貪多大包）*：企圖替換包含 15~20 行未經驗證的程式碼區塊，只要空格、引號或換行微幅不吻合即報錯；甚至跨越 `read_file` 切片邊界憑空拼接未讀行。
+  2. *極端 B（過激無錨）*：失敗後矯枉過正，改以極短、無特徵的通用語句（如純縮排空白 + `errors.append(`）作 Target。因 `edit_file` 具備「全文所有匹配項全數替換」的合約特性，引爆全檔 7 處合法程式碼被錯誤凸排，衍生 10 個語法災難。
+- **演進決策**：確立 **「寬讀窄錨（Wide-Read, Micro-Anchor）」**。讀取 15~20 行掌握上下文全貌，但 `Target` 必須且僅包含具備結構唯一性的控制語句（如特定 `elif <cond>:`），嚴禁泛用無錨替換，且嚴格鎖定於最新切片邊界內。
+
+### 5. 「自動化 TTY 終端死鎖」與版控演進 (Headless Rebase vs. Soft-Reset Consolidation)
+- **歷史教訓**：在版控整頓時，直覺呼叫 `git rebase -i origin/main` 試圖 squash 零散 commit。但在 Agent 無人值守的背景非交互式 session 中，Git 強制呼叫文字編輯器等待用戶輸入，導致 subshell 永久死鎖掛起。
+- **演進決策**：確立 **「Soft-Reset Consolidation（`git reset --soft origin/main`）」** 作為 Agent 原生的 Squash 平替方案，配合 `main` 主幹保護與自適應風格探測，兼顧線性歷史與無人值守穩定性。
+
+### 6. 「記憶膨脹與跨工作階段經驗沉澱」的架構平衡 (Epistemic Memory & Context Firewall)
+- **歷史教訓**：過往試圖將過多工作總結灌入全域 Prompt，導致 Context Window 嚴重膨脹；但完全無狀態又造成相同環境陷阱重複踩坑。
+- **演進決策**：實施 **「實證陷阱快照庫（`.agents/memory/pitfalls.md`）」** 與 **「Context 防火牆」**：
+  1. 每條踩坑經驗嚴格限制在 3 行以內高密度條目，平時不塞進 Prompt，僅在排查疑難時以 `rg` 實證探測。
+  2. 當系統處於 `TIGHT` 姿態時，將大範圍探測或日誌審計外包給 `research` subagent，依據嚴格輸出合約僅傳回結論座標，保證主工作記憶體整潔。
+
 ---
 
 ## 🧩 三、四大階段生命週期與邊界決策 (The 4-Phase Lifecycle)
@@ -69,7 +85,8 @@ Phase 4: Empirical Verification      --> 真機運作、多模態視覺確認、
 | **1000+ 行單檔加新功能** | 盲目在千行檔案裡硬塞複雜狀態，代碼越寫越爛 | **先抽後建（Extract-Before-Extend）**：先將獨立職責抽成純函式/子模組，再乾淨實作，節省 Token 並保障品質。 |
 | **UI / 畫面佈局有問題** | 盯著 CSS/DOM 瞎猜，改完憑空想像修好 | **多模態閉環**：調用 `screen-capture` 截圖並查看，對照畫面除錯，修復後再截圖當交件證據。 |
 | **天馬行空的想法討論** | 把探討當成需求未指明而報警，或直接亂改代碼 | **架構師辯證（Yes, and...）**：純文字探討利弊與隱性代價，守住零寫入邊界，提供低成本沙盒 PoC 選項。 |
-| **修改檔案反覆 Read-Edit** | 改一行 -> 讀全檔 -> 報錯 -> 又讀全檔（Context 暴增） | **低開銷修改**：錨定視窗看足閉合上下文、改完禁止冗餘重讀、依賴編譯器錯誤坐標精確微調。 |
+| **修改檔案反覆 Read-Edit 或全域誤傷** | 改一行 -> 讀全檔 -> 報錯 -> 又讀全檔；或使用無特徵短字串引發全域替換連鎖災難 | **寬讀窄錨與微錨點**：讀足閉合上下文但 Target 僅取最小唯一特徵行；嚴禁無特徵泛用語句；切片外嚴禁憑空拼接。 |
+| **主題分支零散 Commit 需整頓** | 在背景直覺呼叫 `git rebase -i` 導致終端因 `$EDITOR` 永久掛死 | **非交互式軟重置（Soft-Reset）**：以 `git reset --soft origin/main` 將改動整頓回暫存區，重新執行原子化 Conventional Commits。 |
 | **長對話多輪未修好** | 陷入沉沒成本，在錯誤的局部反覆打補丁 | **意圖校準（Intent Recovery）**：停止局部修補，跳回初心（Root Intent），坦誠診斷架構瓶頸並提出升級方案。 |
 | **結構化資料解析與測試處理** | 偷懶手刻脆弱正則偽解析，或對特定測試特例硬編碼（Overfitting） | **Parser-First 與通用邏輯**：結構化資料（HTML/JSON/AST/代碼）嚴格使用標準 Parser；解決根本問題而非特例硬編碼。 |
 
