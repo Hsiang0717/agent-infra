@@ -1,4 +1,4 @@
 {
   "name": "git-agent-flow",
-  "description": "Provides /smart-commit to analyze workspace changes and commit them atomically following Conventional Commits guidelines."
+  "description": "Enforces main branch protection and provides /smart-commit to analyze workspace changes and commit them atomically via native Git CLI following Conventional Commits."
 }
