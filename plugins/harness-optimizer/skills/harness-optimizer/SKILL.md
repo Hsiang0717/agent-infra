@@ -21,9 +21,11 @@ User <=======> Main Agent (Orchestrator)
                   └── Phase 3: Final Verification, Playbook Distillation & Report to User
 ```
 
-- **Main Agent (Orchestrator)**: Interacts with the user, audits the workspace, proposes architectures, confirms parameters, and conducts final acceptance.
-- **Subagent (Training Worker)**: Executes the multi-epoch training loop (`max_epochs >= 3`) inside an isolated session, absorbing compiler noise and test failures without bloating the main context. Returns a high-density summary report upon completion.
-- **Lightweight Mode**: For quick 1-2 epoch tweaks, the Main Agent may execute directly without delegating.
+- **Main Agent (Orchestrator)**: Interacts with the user, audits the workspace, proposes architectures, confirms parameters, conducts final acceptance, and leads interactive perceptual/sensory evaluation loops.
+- **Subagent (Training Worker)**: Executes automated multi-epoch training loops (`max_epochs >= 3`) inside an isolated session, absorbing compiler noise and test failures without bloating the main context. Returns a high-density summary report upon completion.
+- **Adaptive Execution Modes**:
+  - *Automated Mode*: Batch benchmarks and deterministic test suites fully delegate to Subagent.
+  - *Sensory/Interactive Mode*: Real-time audio, video, or GUI tasks maintain Main Agent dialogue for human perceptual feedback across epochs.
 
 ---
 
@@ -51,6 +53,7 @@ Present a clear **Assessment & Selection Proposal** covering four dimensions:
    - *Option A (Accuracy-First)*: Correctness / fail rate (70%), execution latency (20%), diff complexity (10%).
    - *Option B (Performance / Algorithm Tuning)*: Correctness (40%), latency/memory profiling (50%), diff complexity (10%).
    - *Option C (Prompt / Output Quality)*: Output semantic score / rubric distance (70%) + token cost / latency (30%).
+   - *Option D (Sensory / Real-Time Streaming)*: Underrun/glitch immunity (70%), responsiveness/latency (20%), complexity penalty (10%) + human auditory/visual feedback gate.
 
 3. **Optimizer & Mutation Strategy**
    - *Option A (Greedy Hill-Climbing + Reflexion)*: Single targeted mutation per epoch with immediate rollback on regression; reflection triggered after 2 consecutive stalls.

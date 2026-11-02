@@ -17,6 +17,8 @@ This playbook records empirically verified optimization rules, successful refact
 
 - `[Epoch 1]`: Replaced quadratic lookup with dictionary hash index -> Latency reduced by 45%.
 - `[Epoch 2]`: Added memoization cache to recursive sub-problem -> Eliminated duplicate subtree computation.
+- `[Pattern - Real-Time Streaming/Audio]`: Never lock per-sample or per-frame; use local batching to reduce mutex acquisition frequency by >99%.
+- `[Pattern - High-Load Resilience]`: Size decoded buffers to cover peak OS thread scheduling starvation windows (>= 10-12s) and elevate process priority class.
 
 ---
 
@@ -26,6 +28,7 @@ This playbook records empirically verified optimization rules, successful refact
 
 - `[Trap - Avoid]`: Modifying type signatures in `core/types.py` broke external consumer modules.
 - `[Trap - Avoid]`: Inline regex parsing caused catastrophic backtracking on large inputs; prefer tokenizer.
+- `[Trap - Avoid]`: Interleaving arbitrary zero/silence samples into real-time audio streams introduces waveform discontinuities and flutter jitter.
 
 ---
 
