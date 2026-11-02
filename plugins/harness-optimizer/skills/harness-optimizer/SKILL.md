@@ -67,28 +67,42 @@ Present a clear **Assessment & Selection Proposal** covering four dimensions:
 
 ---
 
-## Phase 1: Bootstrap & Harness Scaffolding
+## Phase 1: Bootstrap & Harness Scaffolding (Mandatory Certification Gate)
 
-Once confirmed by the user:
+Once confirmed by the user, follow the strict 5-step scaffolding sequence. Agents are **strictly prohibited from mutating project source code** until Step 4 exits with code 0:
 
 1. **Initialize Baseline Checkpoint**:
    - Create a dedicated optimization branch:
      ```powershell
-     git checkout -b harness/baseline
+     git checkout -b harness/<topic>
      ```
 2. **Scaffold the `.harness/` Environment**:
    - Copy or adapt templates from `<skill_dir>/templates/`:
-     - `.harness/config.json`: Filled with agreed loss weights, hyperparams, and frozen interfaces (`config.json.tmpl`).
-     - `.harness/eval_runner.py`: Black-box test runner outputting standard JSON metrics (`eval_runner.py.tmpl`).
-     - `.harness/playbook.md`: Learned rules and regression traps (`playbook.md.tmpl`).
+     - `.harness/config.json`: Filled with Tiered Loss weights (Tier 1 Crash/Syntax Gate, Tier 2 Quality/Latency), hyperparams, and frozen boundaries (`config.json.tmpl`).
+     - `.harness/eval_runner.py`: Black-box test runner with Train/Holdout split and artifact diff support (`eval_runner.py.tmpl`).
+     - `.harness/playbook.md`: Learned rules, positive invariants, and regression traps (`playbook.md.tmpl`).
      - `.harness/training_log.jsonl`: Append-only training history.
-3. **Epoch 0 Baseline Run**:
-   - Execute the runner once on unmodified code:
+3. **Mandatory Single-Sample Probe Run (`--probe`)**:
+   - Before running the entire dataset, execute the runner with `--probe` on 1 single sample:
+     ```powershell
+     uv run python .harness/eval_runner.py --probe
+     ```
+   - Verifies runtime safety, execution timeout, memory isolation, and JSON serialization without waiting for full dataset battery.
+4. **Mandatory Schema Certification Gate (Strict Blocking Gate)**:
+   - Validate `.harness/metrics.json` strictly using the validator script:
+     ```powershell
+     uv run python <skill_dir>/scripts/validate_metrics.py .harness/metrics.json
+     ```
+   - **Hard Rule**: If this script fails or exits non-zero, the scaffold is incomplete. You MUST fix `eval_runner.py` before modifying any codebase files. Never bypass or treat schema validation as optional.
+5. **Epoch 0 Full Baseline Run & Checkpoint**:
+   - Execute the runner on the full training dataset:
      ```powershell
      uv run python .harness/eval_runner.py --epoch 0
      ```
-   - Verify that output conforms to the metric schema (optionally validate with `validate_metrics.py`).
-   - Record `Epoch 0` baseline loss as `best_loss`.
+   - Record `Epoch 0` baseline loss as `best_loss` and commit baseline scaffold:
+     ```powershell
+     git add .harness/ && git commit -m "chore(harness): initialize verified evaluation harness and epoch 0 baseline"
+     ```
 
 ---
 
@@ -136,16 +150,29 @@ For each epoch `E = 1 .. max_epochs`:
 
 When training concludes:
 
-1. **Playbook Distillation**:
+1. **Blind Holdout Generalization Gate**:
+   - Execute the runner once on the sealed Holdout dataset:
+     ```powershell
+     uv run python .harness/eval_runner.py --holdout
+     ```
+   - Ensure the optimized code generalizes to unseen cases without overfitting. If holdout regression is detected, alert the user and offer to step back to the best generalized checkpoint.
+2. **Interactive Artifact Gallery Audit (For Visual / Multimodal Tasks)**:
+   - Generate or refresh the unified HTML comparison gallery:
+     ```powershell
+     uv run python .harness/eval_runner.py --gallery
+     ```
+   - Empirically inspect side-by-side pairs (Ground Truth vs. Rendered/Actual output) using `read_file` or browser to ensure zero perceptual or structural defects before closure.
+3. **Playbook Distillation**:
    - Consolidate winning refactoring patterns, invariant requirements, and regression traps into `.harness/playbook.md`.
-2. **Adaptive Curriculum Shift (Optional)**:
+4. **Adaptive Curriculum Shift (Optional)**:
    - If functional pass rate reached 100%, offer to shift loss schedule toward execution latency and memory footprint for Stage 2.
-3. **Executive Training Report**:
+5. **Executive Training Report**:
    - Present a clean comparison table to the user:
      | Metric | Baseline (Epoch 0) | Best Checkpoint | Improvement |
      | :--- | :--- | :--- | :--- |
      | Composite Loss | `0.420` | `0.085` | **-79.8%** |
      | Test Pass Rate | `60.0%` | `100.0%` | **+40.0%** |
+     | Holdout Generalization | `58.0%` | `98.0%` | **+40.0%** |
      | Latency | `142ms` | `48ms` | **-66.2%** |
      | Total Commits | - | 4 commits | - |
 
@@ -153,6 +180,7 @@ When training concludes:
 
 ## Gotchas & Anti-Patterns
 
+- **Never Mutate Code Before Scaffolding Certification**: Modifying project code before `validate_metrics.py` exits 0 on the probe run is strictly prohibited.
 - **Never Peek at Black-Box Data**: Inspecting holdout tests directly invalidates the benchmark and constitutes optimization fraud.
 - **Never Skip Phase 0 User Approval**: Building scaffolding or creating Git branches before presenting options violates user alignment.
 - **Enforce Immediate Rollbacks**: Never leave regressed or non-compiling code in the working tree across epochs.

@@ -30,9 +30,12 @@ flowchart TD
         Proposal --> Confirm["等待使用者確認推薦方案或自訂參數"]
     end
 
-    subgraph Phase1 ["Phase 1: 腳手架建立與 Epoch 0 基線"]
-        Branch["建立 harness/baseline 分支"] --> Scaffold["產生 .harness/ (config/runner/playbook)"]
-        Scaffold --> Baseline["執行 Epoch 0 取得 initial best_loss"]
+    subgraph Phase1 ["Phase 1: 腳手架建立、探針認證與 Epoch 0 基線"]
+        Branch["建立 harness/<topic> 分支"] --> Scaffold["產生 .harness/ (config/runner/playbook)"]
+        Scaffold --> Probe["單樣本探針試跑 (--probe)"]
+        Probe --> SchemaGate{"validate_metrics 通過 (code 0)?"}
+        SchemaGate -- 否 (阻斷) --> Scaffold
+        SchemaGate -- 是 --> Baseline["執行 Epoch 0 取得 initial best_loss 並提交 Checkpoint"]
     end
 
     subgraph Phase2 ["Phase 2: 封閉訓練迴圈 (委派 Subagent Context 防火牆)"]
@@ -46,8 +49,10 @@ flowchart TD
         Rollback --> Next
     end
 
-    subgraph Phase3 ["Phase 3: 成果蒸餾與結案 (主 Agent)"]
-        Distill["蒸餾經驗至 .harness/playbook.md"] --> Report["展示 Baseline vs Best 對比報告"]
+    subgraph Phase3 ["Phase 3: 泛化驗收、成果蒸餾與結案 (主 Agent)"]
+        Holdout["留出集泛化盲測 (--holdout 防過擬合)"] --> Gallery["產出物對照畫廊審計 (--gallery)"]
+        Gallery --> Distill["蒸餾經驗至 .harness/playbook.md"]
+        Distill --> Report["展示 Baseline vs Best 對比報告"]
     end
 
     Confirm --> Branch
