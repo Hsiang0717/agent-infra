@@ -1,22 +1,36 @@
 #!/usr/bin/env python3
-"""Standard Black-Box Evaluation Runner Template for Harness Optimizer.
+"""Agent-Native Black-Box Evaluation Runner Meta-Template for Harness Optimizer.
 
-This runner executes the evaluation suite internally, calculates the composite loss,
-extracts sanitized semantic gradients, and outputs structured JSON to stdout.
+IMPORTANT (Dynamic Algorithm Synthesis Principle):
+1. Do NOT use this template unmodified. `validate_metrics.py` will block certification
+   while `TEMPLATE_ADAPTED` is False.
+2. Adapt `execute_suite(split, timeout_sec)` to run the target project's actual test runner,
+   benchmark binary, or multimodal rendering pipeline for `probe`, `train`, and `holdout` splits.
+3. Once adapted, set `TEMPLATE_ADAPTED = True` and verify with `--probe`.
 """
 
 from __future__ import annotations
 
 import argparse
+import html
 import json
+import re
 import subprocess
 import sys
 import time
 from pathlib import Path
 
+# AGENT MUST SET THIS TO True AFTER SYNTHESIZING PROJECT-SPECIFIC EVALUATION LOGIC
+TEMPLATE_ADAPTED = False
 
-def run_internal_tests(timeout_sec: int = 30) -> tuple[int, int, float, list[str]]:
-    """Execute the project's test suite and collect sanitized metrics.
+
+def execute_suite(split: str, timeout_sec: int = 30) -> tuple[int, int, float, list[str]]:
+    """Execute the target evaluation split ('probe', 'train', or 'holdout').
+
+    Args:
+        split: One of 'probe' (1-sample fast smoke check), 'train' (optimization split),
+               or 'holdout' (sealed generalization split).
+        timeout_sec: Subprocess execution timeout in seconds.
 
     Returns:
         (passed_count, failed_count, duration_ms, sanitized_gradients)
@@ -24,9 +38,13 @@ def run_internal_tests(timeout_sec: int = 30) -> tuple[int, int, float, list[str
     start_time = time.perf_counter()
     sanitized_gradients: list[str] = []
 
-    # Example: Run pytest with minimal output and capture exit code / output
-    # Adjust command to target project's test command (e.g. ['pytest', '-q', '--tb=short'])
-    cmd = [sys.executable, "-m", "unittest", "discover", "-s", "tests", "-q"]
+    # Synthesize command per split (e.g., pytest markers, unittest paths, cargo test, or custom validator)
+    if split == "probe":
+        cmd = [sys.executable, "-m", "unittest", "discover", "-s", "tests", "-p", "test_*.py", "-q"]
+    elif split == "holdout":
+        cmd = [sys.executable, "-m", "unittest", "discover", "-s", "tests", "-p", "test_*.py", "-q"]
+    else:
+        cmd = [sys.executable, "-m", "unittest", "discover", "-s", "tests", "-p", "test_*.py", "-q"]
 
     try:
         proc = subprocess.run(
@@ -37,50 +55,82 @@ def run_internal_tests(timeout_sec: int = 30) -> tuple[int, int, float, list[str
             check=False,
         )
         duration_ms = round((time.perf_counter() - start_time) * 1000, 2)
+        combined = f"{proc.stdout or ''}\n{proc.stderr or ''}".strip()
 
-        # Parse test results (customize based on test framework)
-        stderr_text = proc.stderr or proc.stdout or ""
-        if proc.returncode == 0:
-            passed_count = 10  # adjust to actual count or parsed output
-            failed_count = 0
-        else:
-            # Extract high-level failure signatures without leaking dataset content
-            lines = stderr_text.strip().splitlines()
-            for line in lines:
-                if any(err_key in line for err_key in ("FAIL:", "ERROR:", "AssertionError", "ZeroDivisionError", "KeyError")):
-                    sanitized_gradients.append(line.strip()[:160])
+        # Parse unittest "Ran N test(s)" or pytest summary counts dynamically
+        ran_match = re.search(r"Ran\s+(\d+)\s+test", combined)
+        total_detected = int(ran_match.group(1)) if ran_match else (1 if proc.returncode == 0 else 0)
+
+        if proc.returncode == 0 and total_detected > 0:
+            return total_detected, 0, duration_ms, []
+
+        # Extract sanitized error signatures without leaking raw dataset ground-truth
+        for line in combined.splitlines():
+            clean = line.strip()
+            if any(
+                token in clean
+                for token in ("FAIL:", "ERROR:", "Exception", "Error", "assert", "Traceback", "FAILED")
+            ):
+                sanitized_gradients.append(clean[:180])
+
+        failed_Match = re.search(r"failures=(\d+)", combined)
+        errors_Match = re.search(r"errors=(\d+)", combined)
+        failed_count = (int(failed_Match.group(1)) if failed_Match else 0) + (
+            int(errors_Match.group(1)) if errors_Match else 0
+        )
+        if failed_count == 0:
             failed_count = max(1, len(sanitized_gradients))
-            passed_count = max(0, 10 - failed_count)
 
-        return passed_count, failed_count, duration_ms, sanitized_gradients[:5]
+        total_count = max(total_detected, failed_count)
+        passed_count = max(0, total_count - failed_count)
+        return passed_count, failed_count, duration_ms, sanitized_gradients[:8]
 
     except subprocess.TimeoutExpired:
         duration_ms = round(timeout_sec * 1000, 2)
-        sanitized_gradients.append(f"Execution timeout exceeded ({timeout_sec}s)")
-        return 0, 10, duration_ms, sanitized_gradients
+        sanitized_gradients.append(f"Tier-1 Gate: Execution timeout exceeded ({timeout_sec}s)")
+        return 0, 1, duration_ms, sanitized_gradients
 
 
-def get_git_diff_lines() -> int:
-    """Calculate the number of changed lines in the current working tree."""
+def check_frozen_violations(frozen_interfaces: list[str]) -> list[str]:
+    """Return any frozen interface paths modified in the working tree."""
+    if not frozen_interfaces:
+        return []
     try:
         res = subprocess.run(
-            ["git", "diff", "--shortstat"],
+            ["git", "diff", "--name-only", "HEAD", "--", *frozen_interfaces],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        return [line.strip() for line in res.stdout.splitlines() if line.strip()]
+    except Exception:
+        return []
+
+
+def get_git_diff_stats(mutable_paths: list[str]) -> tuple[int, int]:
+    """Calculate (changed_lines, touched_files) restricted to mutable_paths."""
+    try:
+        path_args = ["--", *mutable_paths] if mutable_paths else ["--", ".", ":!.harness"]
+        res = subprocess.run(
+            ["git", "diff", "--shortstat", "HEAD", *path_args],
             capture_output=True,
             text=True,
             check=False,
         )
         out = res.stdout.strip()
-        # Format: "X files changed, Y insertions(+), Z deletions(-)"
+        files_touched = 0
         insertions = 0
         deletions = 0
         for part in out.split(","):
-            if "insertion" in part:
-                insertions = int("".join(filter(str.isdigit, part)))
+            if "file" in part:
+                files_touched = int("".join(filter(str.isdigit, part)) or 0)
+            elif "insertion" in part:
+                insertions = int("".join(filter(str.isdigit, part)) or 0)
             elif "deletion" in part:
-                deletions = int("".join(filter(str.isdigit, part)))
-        return insertions + deletions
+                deletions = int("".join(filter(str.isdigit, part)) or 0)
+        return insertions + deletions, files_touched
     except Exception:
-        return 0
+        return 0, 0
 
 
 def compute_composite_loss(
@@ -88,20 +138,81 @@ def compute_composite_loss(
     total_count: int,
     latency_ms: float,
     diff_lines: int,
+    files_touched: int,
+    frozen_violation: bool,
     weights: dict[str, float],
+    baseline_latency_ms: float | None,
+    max_lines: int,
+    max_files: int,
 ) -> float:
-    """Compute normalized composite loss."""
-    fail_rate = (failed_count / max(1, total_count))
-    latency_norm = min(1.0, latency_ms / 10000.0)
-    complexity_norm = min(1.0, diff_lines / 100.0)
+    """Compute Tiered Composite Loss with relative baseline latency normalization."""
+    # Tier-1 Hard Gate: Frozen contract breach, empty test suite, or learning-rate budget breach
+    if frozen_violation or total_count <= 0:
+        return 1.0
+    if (max_lines > 0 and diff_lines > max_lines) or (max_files > 0 and files_touched > max_files):
+        return 1.0
+
+    fail_rate = failed_count / max(1, total_count)
+
+    # Relative baseline normalization: latency equal to baseline -> 0.5 of latency ceiling
+    ref_latency = baseline_latency_ms if (baseline_latency_ms and baseline_latency_ms > 0) else 5000.0
+    latency_norm = min(1.0, latency_ms / max(1.0, ref_latency * 2.0))
+    complexity_norm = min(1.0, diff_lines / max(1.0, float(max_lines)))
 
     w_fail = weights.get("test_failure_rate", 0.70)
     w_lat = weights.get("latency_penalty", 0.20)
     w_diff = weights.get("diff_complexity_penalty", 0.10)
 
-    total_weight = w_fail + w_lat + w_diff
+    total_weight = max(1e-6, w_fail + w_lat + w_diff)
     raw_loss = (w_fail * fail_rate) + (w_lat * latency_norm) + (w_diff * complexity_norm)
-    return round(raw_loss / total_weight, 4)
+    return round(min(1.0, max(0.0, raw_loss / total_weight)), 4)
+
+
+def generate_artifact_gallery(manifest_path: Path, output_html: Path) -> Path:
+    """Generate a self-contained HTML comparison gallery from .harness/artifacts_manifest.json."""
+    items = []
+    if manifest_path.exists():
+        try:
+            items = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except Exception:
+            items = []
+
+    rows_html = []
+    for item in items:
+        case_id = html.escape(str(item.get("id", "sample")))
+        gt = html.escape(str(item.get("ground_truth", "")))
+        actual = html.escape(str(item.get("actual_output", "")))
+        status = html.escape(str(item.get("status", "PASS")))
+        rows_html.append(
+            f"<tr><td><strong>{case_id}</strong><br><span>{status}</span></td>"
+            f"<td><pre>{gt}</pre></td><td><pre>{actual}</pre></td></tr>"
+        )
+
+    body = "\n".join(rows_html) if rows_html else "<tr><td colspan='3'>No artifact pairs recorded.</td></tr>"
+    doc = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Harness Artifact Comparison Gallery</title>
+<style>
+body {{ font-family: system-ui, sans-serif; margin: 24px; background: #0f172a; color: #e2e8f0; }}
+table {{ width: 100%; border-collapse: collapse; margin-top: 16px; }}
+th, td {{ border: 1px solid #334155; padding: 12px; vertical-align: top; text-align: left; }}
+th {{ background: #1e293b; }}
+pre {{ white-space: pre-wrap; word-break: break-word; margin: 0; font-size: 13px; }}
+</style>
+</head>
+<body>
+<h1>Harness Optimizer — Artifact Comparison Gallery</h1>
+<table>
+<thead><tr><th>Case ID / Status</th><th>Ground Truth / Reference</th><th>Rendered / Actual Output</th></tr></thead>
+<tbody>{body}</tbody>
+</table>
+</body>
+</html>"""
+    output_html.parent.mkdir(parents=True, exist_ok=True)
+    output_html.write_text(doc, encoding="utf-8")
+    return output_html
 
 
 def main() -> None:
@@ -113,47 +224,124 @@ def main() -> None:
     parser.add_argument("--gallery", action="store_true", help="Generate side-by-side artifact comparison gallery")
     args = parser.parse_args()
 
-    # Load config weights
+    harness_dir = Path(".harness")
+    harness_dir.mkdir(parents=True, exist_ok=True)
+
+    if args.gallery:
+        gallery_file = generate_artifact_gallery(
+            harness_dir / "artifacts_manifest.json", harness_dir / "gallery.html"
+        )
+        print(json.dumps({"gallery_generated": str(gallery_file)}, indent=2))
+        return
+
+    split = "probe" if args.probe else ("holdout" if args.holdout else "train")
+
+    # Load config
     config_path = Path(args.config)
     weights = {"test_failure_rate": 0.70, "latency_penalty": 0.20, "diff_complexity_penalty": 0.10}
     timeout_sec = 10 if args.probe else 30
+    mutable_paths: list[str] = ["src/"]
+    frozen_interfaces: list[str] = []
+    max_lines = 80
+    max_files = 2
+    max_holdout_degradation = 0.05
 
     if config_path.exists():
         try:
-            with open(config_path, "r", encoding="utf-8") as f:
-                cfg = json.load(f)
-                weights = cfg.get("loss_weights", weights)
-                timeout_sec = cfg.get("constraints", {}).get("timeout_seconds_per_run", timeout_sec)
+            cfg = json.loads(config_path.read_text(encoding="utf-8"))
+            weights = cfg.get("loss_weights", weights)
+            constraints = cfg.get("constraints", {})
+            timeout_sec = constraints.get("timeout_seconds_per_run", timeout_sec)
+            mutable_paths = constraints.get("mutable_paths", mutable_paths)
+            frozen_interfaces = constraints.get("frozen_interfaces", frozen_interfaces)
+            hyper = cfg.get("hyperparameters", {})
+            max_holdout_degradation = hyper.get("max_holdout_degradation", max_holdout_degradation)
+            lr = hyper.get("learning_rate", {})
+            max_lines = lr.get("max_lines_changed_per_epoch", max_lines)
+            max_files = lr.get("max_files_touched_per_epoch", max_files)
         except Exception:
             pass
 
-    passed, failed, latency_ms, gradients = run_internal_tests(timeout_sec=timeout_sec)
-    total_tests = passed + failed
-    pass_rate = round(passed / max(1, total_tests), 4)
-    diff_lines = get_git_diff_lines()
+    # Load or initialize baseline anchors
+    baseline_path = harness_dir / "baseline.json"
+    baseline_data: dict = {}
+    if baseline_path.exists():
+        try:
+            baseline_data = json.loads(baseline_path.read_text(encoding="utf-8"))
+        except Exception:
+            baseline_data = {}
 
-    loss = compute_composite_loss(failed, total_tests, latency_ms, diff_lines, weights)
+    frozen_touched = check_frozen_violations(frozen_interfaces)
+    frozen_violation = len(frozen_touched) > 0
+    diff_lines, files_touched = get_git_diff_stats(mutable_paths)
+
+    passed, failed, latency_ms, gradients = execute_suite(split=split, timeout_sec=timeout_sec)
+    total_tests = passed + failed
+    pass_rate = round(passed / max(1, total_tests), 4) if total_tests > 0 else 0.0
+
+    if frozen_violation:
+        gradients.insert(0, f"Tier-1 Contract Violation: Modified frozen files {frozen_touched}")
+    if max_lines > 0 and diff_lines > max_lines:
+        gradients.insert(0, f"Tier-1 Learning Rate Exceeded: diff_lines={diff_lines} > max={max_lines}")
+    if max_files > 0 and files_touched > max_files:
+        gradients.insert(0, f"Tier-1 Learning Rate Exceeded: files_touched={files_touched} > max={max_files}")
+
+    baseline_latency = baseline_data.get("baseline_latency_ms")
+    loss = compute_composite_loss(
+        failed_count=failed,
+        total_count=total_tests,
+        latency_ms=latency_ms,
+        diff_lines=diff_lines,
+        files_touched=files_touched,
+        frozen_violation=frozen_violation,
+        weights=weights,
+        baseline_latency_ms=baseline_latency,
+        max_lines=max_lines,
+        max_files=max_files,
+    )
+
+    # Persist Epoch 0 baselines for relative scaling & holdout anti-overfitting gate
+    overfitting_detected = False
+    if args.epoch == 0 and split == "train" and total_tests > 0:
+        baseline_data["baseline_latency_ms"] = latency_ms
+        baseline_data["epoch_0_train_loss"] = loss
+        baseline_path.write_text(json.dumps(baseline_data, indent=2), encoding="utf-8")
+    elif split == "holdout" and total_tests > 0:
+        if "epoch_0_holdout_loss" not in baseline_data or args.epoch == 0:
+            baseline_data["epoch_0_holdout_loss"] = loss
+            baseline_path.write_text(json.dumps(baseline_data, indent=2), encoding="utf-8")
+        else:
+            holdout_base = baseline_data["epoch_0_holdout_loss"]
+            if (loss - holdout_base) > max_holdout_degradation:
+                overfitting_detected = True
+                gradients.insert(
+                    0,
+                    f"OVERFITTING_DETECTED: Holdout loss {loss} degraded by >{max_holdout_degradation} vs baseline {holdout_base}",
+                )
 
     metric_output = {
         "epoch": args.epoch,
+        "split": split,
+        "template_adapted": TEMPLATE_ADAPTED,
         "composite_loss": loss,
         "pass_rate": pass_rate,
-        "failed_count": failed,
         "passed_count": passed,
+        "failed_count": failed,
+        "total_count": total_tests,
         "latency_ms": latency_ms,
         "diff_lines": diff_lines,
+        "files_touched": files_touched,
+        "frozen_violation": frozen_violation,
+        "overfitting_detected": overfitting_detected,
         "sanitized_gradients": gradients,
     }
 
-    # Automatically persist to .harness/metrics.json for validator inspection
-    metrics_path = Path(".harness/metrics.json")
+    metrics_path = harness_dir / "metrics.json"
     try:
-        metrics_path.parent.mkdir(parents=True, exist_ok=True)
         metrics_path.write_text(json.dumps(metric_output, indent=2), encoding="utf-8")
     except Exception:
         pass
 
-    # Ensure clean JSON output on stdout (never print debug junk)
     print(json.dumps(metric_output, indent=2))
 
 

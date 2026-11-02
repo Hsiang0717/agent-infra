@@ -1,12 +1,14 @@
 {
   "project_name": "target-project",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "hyperparameters": {
     "max_epochs": 8,
     "patience": 3,
     "target_loss": 0.05,
+    "min_improvement_delta": 0.005,
+    "max_holdout_degradation": 0.05,
     "learning_rate": {
-      "max_lines_changed_per_epoch": 60,
+      "max_lines_changed_per_epoch": 80,
       "max_files_touched_per_epoch": 2
     }
   },
@@ -16,12 +18,18 @@
     "diff_complexity_penalty": 0.10
   },
   "constraints": {
+    "mutable_paths": [
+      "src/"
+    ],
     "frozen_interfaces": [
       "src/api/public_interface.py",
       "src/cli.py"
     ],
+    "train_dataset_patterns": [
+      "tests/unit/**"
+    ],
     "holdout_dataset_patterns": [
-      "tests/datasets/**",
+      "tests/holdout/**",
       "eval/**"
     ],
     "timeout_seconds_per_run": 30

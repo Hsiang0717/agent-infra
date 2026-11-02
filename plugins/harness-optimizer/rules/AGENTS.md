@@ -1,87 +1,87 @@
-# Harness Optimizer & Black-Box Optimization Protocol (AAEP Edition)
+# Harness Optimizer & Black-Box Optimization Protocol (AAEP Agent-Native Edition)
 
-This protocol governs iterative code, algorithm, prompt, and test-harness optimization under the Autonomous Agent Engineering Protocol (AAEP). It enforces black-box dataset integrity, scaffolding foolproofing, holdout anti-overfitting, atomic rollback hygiene, and context firewall delegation.
+This protocol governs autonomous iterative code, algorithm, prompt, and test-harness optimization under the Autonomous Agent Engineering Protocol (AAEP). It enforces **Agent-Native end-to-end autonomy (minimal human intervention)**, black-box dataset integrity, mandatory probe/schema certification, relative-baseline tiered loss, holdout anti-overfitting, and clean atomic rollbacks.
 
 ---
 
-## 1. Scaffolding Integrity & Pre-Flight Probe Gate (Zero-Mutation Boundary)
+## 0. Agent-Native Autonomy & Minimal Human Intervention Boundary
+
+- **Autonomous End-to-End Execution by Default**:
+  - When invoked, the Agent must autonomously audit the repository, detect toolchains/datasets/interfaces, synthesize the `.harness/` configuration and evaluation runner, certify the Probe Gate, run the training loop, and deliver the verified result **without halting for routine confirmation**.
+  - Do NOT present multi-choice questionnaires for parameters (loss weights, epoch counts, mutation strategies) that can be empirically inferred from the codebase.
+- **Strict Human Intervention Boundary (Ask ONLY for Missing Ground Truth)**:
+  - Interrupt autonomous execution to ask the user **ONLY** when:
+    1. **Missing Evaluation Oracle**: No test suite, benchmark, dataset, or verifiable objective criteria exist and none can be deterministically derived from project specifications.
+    2. **External Blockers**: Required credentials, external endpoints, hardware devices, or user-supplied input assets are missing.
+    3. **Irreconcilable Contract Conflict**: Optimizing the target requires breaking a public API contract and user intent is ambiguous.
+
+---
+
+## 1. Scaffolding Integrity & 5-Step Pre-Flight Probe Gate (Zero-Mutation Boundary)
 
 - **Absolute Freeze Before Scaffold Certification**:
-  - Agents are strictly forbidden from modifying, refactoring, or optimizing any project code before the `.harness/` infrastructure is 100% complete, verified, and certified via the 4-step Pre-Flight Gate.
-- **Mandatory 4-Step Scaffolding Gate**:
-  1. **Topic Branch**: Dedicated branch created off clean state (`harness/<topic>`).
-  2. **Trifecta Scaffold**: Complete `.harness/` configuration files present (`config.json`, `eval_runner.py`, `playbook.md`).
-  3. **Mandatory 1-Sample Probe Run**: Execute runner with `--probe` (1 single test case) to prove end-to-end execution, timeout safety, and clean JSON serialization without running the full battery.
-  4. **Strict Schema Gate**: Validate output strictly via `validate_metrics.py .harness/metrics.json`. The gate passes ONLY if validation exits with code 0 and zero missing fields (`composite_loss`, `pass_rate`, `latency_ms`, `diff_lines`).
-- **Baseline Epoch 0 Lock**:
-  - Full dataset Epoch 0 baseline must be recorded and committed before any mutation turn begins.
+  - Agents are strictly forbidden from modifying, refactoring, or optimizing any project source code before the `.harness/` infrastructure is 100% synthesized and certified via the 5-Step Pre-Flight Gate.
+- **Mandatory 5-Step Scaffolding Gate**:
+  1. **Topic Branch**: Dedicated branch created off a clean working tree (`harness/<topic>`).
+  2. **Synthesized Trifecta Scaffold**: Complete `.harness/` files (`config.json`, project-adapted `eval_runner.py` with `TEMPLATE_ADAPTED = True`, and `playbook.md`). Blindly copying unadapted boilerplate is blocked.
+  3. **Mandatory 1-Sample Probe Run**: Execute `uv run python .harness/eval_runner.py --probe` to verify runtime execution, timeout safety, and JSON output on a single sample/smoke slice.
+  4. **Strict Schema & Anti-Boilerplate Gate**: Validate output via `validate_metrics.py .harness/metrics.json`. Certification passes ONLY if exit code is `0` (`template_adapted == True`, `total_count > 0`, `frozen_violation == False`, and normalized `composite_loss` in `[0.0, 1.0]`).
+  5. **Dual Baseline Epoch 0 Lock**: Execute both `uv run python .harness/eval_runner.py --epoch 0` (Train baseline) and `uv run python .harness/eval_runner.py --epoch 0 --holdout` (Holdout baseline) to lock `.harness/baseline.json` (`baseline_latency_ms`, `epoch_0_train_loss`, `epoch_0_holdout_loss`), and commit `.harness/` before any code mutation begins.
 
 ---
 
 ## 2. Black-Box Dataset Isolation & Holdout Generalization Gate (Anti-Overfitting)
 
-- **Absolute Read Freeze on Datasets**:
-  - Agents are strictly forbidden from directly reading, inspecting, or searching the contents of sealed evaluation datasets, ground-truth label files, or holdout test cases (e.g. paths matching `dataset/`, `eval/`, `test_data/`, `*holdout*`, `*.jsonl`, `*.csv` containing validation pairs).
-  - Never execute file dump commands (`cat`, `type`, `read_file`, `head`) or content search (`rg`, `grep`) targeting holdout evaluation data.
+- **Absolute Read Freeze on Holdout Datasets**:
+  - Agents are strictly forbidden from reading, dumping, or searching the contents of sealed holdout datasets or ground-truth answer files (`*holdout*`, `eval/`, `test_data/`).
 - **Holdout Set Blind Verification (Anti-Overfitting Gate)**:
-  - Dataset must maintain a distinct Train / Holdout split.
-  - The Holdout set remains strictly blind during inner training epochs and is probed only at Epoch 0 and candidate winning checkpoints.
-  - If Train Loss improves while Holdout Loss regresses by > 5%, the optimizer must flag `OVERFITTING_DETECTED` and rollback to the best generalized checkpoint.
+  - The Holdout set remains blind during inner training epochs (`1..N`) and is evaluated only at Epoch 0 (baseline anchor) and at candidate winning checkpoints (Phase 3).
+  - If Train Loss improves while Holdout Loss degrades by more than `max_holdout_degradation` (default `0.05` / `5%`) relative to `epoch_0_holdout_loss`, the runner flags `overfitting_detected: true` and the agent must revert to the best generalized checkpoint.
 - **Stateless Purity & Cache Isolation Invariant**:
-  - Every evaluation case must run with isolated memory/state or reset module-level caches between runs. Cross-sample state accumulation or leakage across cases is strictly forbidden.
-- **Sanitized Metric Interface**:
-  - All feedback from the test environment must pass strictly through the evaluation runner's sanitized JSON output (`eval_runner`).
-  - Runner outputs must report statistical metrics (`pass_rate`, `composite_loss`, `latency_ms`, failure category counts) and anonymized semantic gradients without leaking expected answers or input payloads.
-- **Zero Special-Casing (Anti-Cheating)**:
-  - Optimizations must represent authentic generalized logic or algorithmic improvements.
-  - Hardcoding outputs, injecting `if input == 'x': return 'y'`, or pattern-matching specific test samples is strictly forbidden and constitutes optimization fraud.
+  - Every evaluation sample must run with isolated state or reset module-level caches between cases. Cross-sample state leakage is strictly forbidden.
+- **Sanitized Metric Interface & Zero Special-Casing**:
+  - All test feedback must flow through `.harness/metrics.json` without leaking raw holdout payloads.
+  - Hardcoding outputs, Lookup-Table (LUT) memorization, or `if input == 'x': return 'y'` special-casing constitutes optimization fraud and is strictly forbidden.
 
 ---
 
-## 3. Atomic Rollback & Checkpoint Protocol
+## 3. Atomic Rollback, Noise Floor & Contract Protection Protocol
 
-- **Clean Baseline Tagging**:
-  - Before modifying any codebase parameter, establish a baseline Git checkpoint (branch or tag `harness-baseline`).
-- **Bounded Mutation (Learning Rate)**:
-  - Each optimization epoch must respect the configured diff budget (e.g., max 1-2 functions or <= 80 diff lines per step). Never rewrite unrelated modules during an optimization step.
-  - Frozen interfaces and public API contracts must remain strictly unmodified.
-- **Zero-Tolerance Regression Rollback**:
-  - If an epoch yields `new_loss >= best_loss` or causes functional regressions, immediately discard the uncommitted changes:
+- **Bounded Mutation & Frozen Contract Guard**:
+  - Each epoch mutation must stay strictly within `constraints.mutable_paths` and respect `learning_rate` (`max_lines_changed_per_epoch`, `max_files_touched_per_epoch`).
+  - Any modification to `constraints.frozen_interfaces` sets `frozen_violation = True` and triggers an immediate Tier-1 hard gate (`composite_loss = 1.0`).
+- **Statistical Noise Threshold (`min_improvement_delta`)**:
+  - A candidate mutation is accepted ONLY if `new_loss <= best_loss - min_improvement_delta` (default `0.005`) and `frozen_violation == False`. Micro-fluctuations from OS scheduling noise must not be committed.
+- **Zero-Residue Clean Rollback**:
+  - Whenever an epoch fails to beat `best_loss - min_improvement_delta` or triggers a Tier-1 gate, immediately purge both modified and untracked files in mutable paths:
     ```powershell
-    git checkout -- <modified_files>
+    git checkout -- <mutable_paths>
+    git clean -fd <mutable_paths>
     ```
-  - Never allow regressed edits or syntax failures to compound into subsequent epochs.
+  - Record the failed hypothesis in `.harness/playbook.md` under Regression Traps.
 - **Atomic Success Commit**:
-  - When `new_loss < best_loss`, stage the winning diff and create an atomic Conventional Commit:
+  - When a mutation succeeds, stage only `mutable_paths` and `.harness/` logs and create an atomic Conventional Commit:
     ```powershell
-    git commit -m "perf(harness): epoch <N> loss <best_loss> (<improvement_percent>%)"
+    git add <mutable_paths> .harness/playbook.md .harness/training_log.jsonl
+    git commit -m "perf(harness): epoch <E> loss <new_loss> (<improvement_pct>%)"
     ```
-  - Record the winning hypothesis in `.harness/training_log.jsonl`.
 
 ---
 
 ## 4. Two-Tier Orchestrator-Worker Protocol (Context Firewall)
 
-To prevent catastrophic token debt and preserve context agility during multi-epoch runs:
-
 - **Main Agent (Orchestrator)**:
-  - **Owns Phase 0 & Phase 1**: Conducts read-only pre-flight checks, aligns parameters, builds the scaffold, certifies the Probe Gate, and commits Epoch 0 baseline.
-  - **Owns Verification & Closure (Phase 3)**: Reviews the final report, verifies the winning commit, audits visual/artifact gallery, and distills high-level playbook learnings to the user.
+  - **Owns Phase 0 & Phase 1**: Conducts autonomous pre-flight discovery, synthesizes `.harness/`, certifies the 5-Step Probe Gate, and locks Epoch 0 Train + Holdout baselines.
+  - **Owns Phase 3 Closure**: Runs Holdout Generalization verification, inspects the Artifact Gallery (`--gallery`), distills `.harness/playbook.md`, and presents the final Executive Report.
 - **Subagent (Training Worker)**:
-  - **Owns Multi-Epoch Training (Phase 2)**: When `max_epochs >= 3`, the Main Agent must delegate the iterative loop to a subagent (`self`) via `invoke_subagent`.
-  - **Context Firewall**: All intermediate test failures, compiler traces, and rollback churn remain contained within the worker's sandboxed session.
-  - **Subagent Contract**: The worker returns only a dense summary matrix upon completion (or early stop), reporting:
-    1. Baseline vs. Best Checkpoint metrics (`composite_loss`, `pass_rate`, `latency`).
-    2. Winning commits and modified files.
-    3. Distilled rules added to `.harness/playbook.md`.
+  - **Owns Phase 2 (`max_epochs >= 3`)**: Main Agent delegates the multi-epoch loop via `invoke_subagent(TypeName: "self", Role: "Harness Training Worker")` on branch `harness/<topic>`.
+  - **Context Firewall**: Intermediate test traces and rollback churn stay inside the subagent session; only the structured summary matrix is returned.
 
 ---
 
 ## 5. Universal Artifact Diff & Multimodal Verification Protocol
 
 - **Artifact Paired Output**:
-  - For projects generating non-scalar outputs (SVG, UI layouts, images, audio, formatted text, ASTs), the evaluation runner must pair each sample with reference artifacts (`ground_truth` vs `actual_output`).
-- **Interactive Gallery Verification Gate**:
-  - Unit tests or compiler passes (Exit code 0) do not constitute completion for perceptual/artifact tasks.
-  - Evaluation harnesses must output a lightweight, self-contained HTML gallery enabling side-by-side verification across all cases.
-  - Final acceptance requires empirical visual or multimodal verification via `read_file` or screenshot inspection before declaring the optimization done.
+  - For non-scalar outputs (TikZ/SVG, UI layouts, images, audio, formatted documents), `eval_runner.py` must write paired artifact records to `.harness/artifacts_manifest.json` (`id`, `status`, `ground_truth`, `actual_output`).
+- **Empirical Gallery Gate**:
+  - Before final closure on visual/perceptual tasks, execute `uv run python .harness/eval_runner.py --gallery` to generate `.harness/gallery.html` and empirically inspect rendered outputs via `read_file` or screen capture.
