@@ -55,10 +55,15 @@ Present a clear **Assessment & Selection Proposal** covering four dimensions:
    - *Option C (Prompt / Output Quality)*: Output semantic score / rubric distance (70%) + token cost / latency (30%).
    - *Option D (Sensory / Real-Time Streaming)*: Underrun/glitch immunity (70%), responsiveness/latency (20%), complexity penalty (10%) + human auditory/visual feedback gate.
 
-3. **Optimizer & Mutation Strategy**
-   - *Option A (Greedy Hill-Climbing + Reflexion)*: Single targeted mutation per epoch with immediate rollback on regression; reflection triggered after 2 consecutive stalls.
-   - *Option B (Best-of-N Candidates)*: Propose 2-3 candidate hypotheses per epoch, evaluate each, and commit the lowest-loss candidate.
-   - *Option C (Two-Stage Curriculum)*: Stage 1 reaches 100% test pass rate; Stage 2 automatically pivots loss weights to optimize latency and memory.
+3. **Optimizer & Mutation Strategy (Dynamically Synthesized by Domain)**
+   - *Option A (Greedy Hill-Climbing + Reflexion)*: Single targeted code mutation per epoch with immediate rollback on regression; algorithmic reflexion triggered after 2 consecutive stalls. (Best for deterministic logic, math kernels, and data structures).
+   - *Option B (Best-of-N Candidates / Genetic Exploration)*: Propose 2-3 candidate hypotheses per epoch, evaluate each independently, and commit the lowest-loss candidate. (Best for complex combinatorial or heuristic algorithms).
+   - *Option C (Two-Stage Curriculum)*: Stage 1 optimizes 100% test pass rate / correctness; Stage 2 automatically shifts loss weights to optimize latency, throughput, and memory footprint.
+   - *Option D (Multimodal Visual / Artifact Reflection Loop)*: Generate candidate -> Render artifact -> Side-by-side critique against ground-truth -> Extract structural defect coordinates -> Synthesize domain invariants into prompt/playbook -> Self-heal. (Best for TikZ, SVG, UI rendering, PDF/Markdown formatting, or generative pipelines).
+
+> [!IMPORTANT]
+> **Dynamic Algorithm Synthesis Principle**:
+> Templates in `templates/` are structural archetypes, **NOT static boilerplate to be blindly copied**. In Phase 1, the Agent must **dynamically synthesize `eval_runner.py`, loss formulas, and gradient extractors** tailored to the project's real runtime, file scale, dataset format, and sensory/visual modality.
 
 4. **Hyperparameters & Stopping Criteria**
    - Propose defaults for `max_epochs` (e.g. 6-10), `patience` (e.g. 3), `learning_rate` (max lines/files touched per epoch), and `target_loss`.
