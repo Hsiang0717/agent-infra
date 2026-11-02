@@ -10,6 +10,7 @@ Thumbs.db
 # test hook trigger/
 .gemini/
 .agents/
+!.agents/memory/
 *.dll
 target/
 scratch/
