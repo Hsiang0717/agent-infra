@@ -19,6 +19,7 @@ description: "Enforce Windows pwsh environment and agent-native CLI tools (rg, f
   - **4. Surgical File Editing Protocol (Minimal Unique Target):**
     - Use `edit_file` for surgical replacements and `write_file` only for new files or full rewrites.
     - **Micro-Anchoring:** Copy `Target` verbatim from a fresh read slice strictly within read boundaries. Keep `Target` scoped to the minimal unique context needed (enclosing signature/condition). Because `edit_file` replaces all occurrences, never target generic repeated statements or bare whitespace alone. Avoid bloated multi-statement targets to eliminate whitespace/drift mismatch risks.
+    - **Target Invariant Compliance:** When the system hook injects a `[Target Invariant: ...]` notice (e.g. non-standard 3-space indentation, tabs, trailing whitespace, or double backslashes), match the cited invariant verbatim. Never assume conventional 4-space markdown/PEP8 indentation. Note that in JSON tool calls, source code backslashes must be double-escaped (e.g. source `\\node` must be serialized as `\\\\node` in JSON).
   - **5. VCS Status:** Use native `git status -s` (minimal 2-char status prefix).
 
 - **Agent-Native CLI Helpers (Essential pwsh extensions):**

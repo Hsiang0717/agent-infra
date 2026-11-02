@@ -19,6 +19,12 @@
 3. **完全遵循 Antigravity Hook 協議**：
    * 透過標準輸出輸出 `{"injectSteps": [{"ephemeralMessage": "..."}]}`。
    * 不寫入持久歷史，僅作為模型每次推論前的引導參照。
+4. **切片特徵與縮排不變量即時探測（Target Invariant Detector）**：
+   * 當前一步驟執行了 `read_file`，Hook 自動分析讀取切片中的微觀排版特徵：
+     - **非典型縮排**：探測奇數空格（如 3 格、5 格）或 Tab 縮排，防止模型慣性套用 4 格縮排。
+     - **跳脫字元**：探測程式碼中的雙反斜線（`\\` 如 LaTeX 或正則），提醒模型在 JSON 工具呼叫中加倍跳脫（`\\\\`）。
+     - **行尾空白**：探測肉眼不可見的行尾空白，避免 `edit_file` 比對失敗。
+   * 輸出如 `[Target Invariant: 3-space indent; \\ escape; match verbatim]`，配合 AAEP 協議達成零失誤編輯。
 
 ---
 

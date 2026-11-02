@@ -180,6 +180,7 @@ struct TranscriptStep {
     input_tokens: Option<u64>,
     output_tokens: Option<u64>,
     cache_read_tokens: Option<u64>,
+    content: Option<serde_json::Value>,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
@@ -370,6 +371,154 @@ pub fn probe_transcript_tokens(path: &Path) -> (u64, u64) {
     }
 
     (0, 0)
+}
+
+// ─── Target Invariant Detector (Slice Quirks) ────────────────────────────────
+
+#[derive(Debug, Default, PartialEq, Eq, Clone)]
+pub struct SliceInvariants {
+    pub odd_indents: Vec<usize>,
+    pub has_tabs: bool,
+    pub has_double_backslashes: bool,
+    pub has_trailing_ws: bool,
+}
+
+impl SliceInvariants {
+    pub fn detect_from_read_output(content: &str) -> Option<Self> {
+        let mut odd_indents_set = std::collections::BTreeSet::new();
+        let mut has_tabs = false;
+        let mut has_double_backslashes = false;
+        let mut has_trailing_ws = false;
+        let mut found_file_lines = 0;
+
+        for line in content.lines() {
+            if let Some(file_line) = strip_line_prefix_from_line(line) {
+                found_file_lines += 1;
+
+                if file_line.trim().is_empty() {
+                    continue;
+                }
+
+                // Check trailing whitespace
+                if file_line.ends_with(' ') || file_line.ends_with('\t') {
+                    has_trailing_ws = true;
+                }
+
+                // Count leading whitespace
+                let ws_len = file_line.chars().take_while(|c| c.is_whitespace()).count();
+                if ws_len > 0 {
+                    let ws_str: String = file_line.chars().take(ws_len).collect();
+                    if ws_str.contains('\t') {
+                        has_tabs = true;
+                    } else if ws_len % 2 != 0 {
+                        // Odd number of leading spaces (e.g. 1, 3, 5)
+                        odd_indents_set.insert(ws_len);
+                    }
+                }
+
+                // Check for double backslashes in code line (e.g. \\node, \\\\, \\d+)
+                if file_line.contains(r"\\") {
+                    has_double_backslashes = true;
+                }
+            }
+        }
+
+        if found_file_lines == 0 {
+            return None;
+        }
+
+        if odd_indents_set.is_empty() && !has_tabs && !has_double_backslashes && !has_trailing_ws {
+            return None;
+        }
+
+        Some(SliceInvariants {
+            odd_indents: odd_indents_set.into_iter().collect(),
+            has_tabs,
+            has_double_backslashes,
+            has_trailing_ws,
+        })
+    }
+
+    pub fn format_hint(&self) -> String {
+        let mut parts = Vec::new();
+        if !self.odd_indents.is_empty() {
+            let indents: Vec<String> = self.odd_indents.iter().map(|n| format!("{}-space", n)).collect();
+            parts.push(format!("{} indent", indents.join("/")));
+        }
+        if self.has_tabs {
+            parts.push(r"tab (\t) indent".to_string());
+        }
+        if self.has_double_backslashes {
+            parts.push(r"\\ escape (JSON requires \\\\)".to_string());
+        }
+        if self.has_trailing_ws {
+            parts.push("trailing whitespace".to_string());
+        }
+        format!("[Target Invariant: {}; match verbatim, avoid 4-space/single-\\ assumption]", parts.join("; "))
+    }
+}
+
+pub fn probe_recent_read_invariants(path: &Path) -> Option<String> {
+    let mut file = match File::open(path) {
+        Ok(f) => f,
+        Err(_) => return None,
+    };
+
+    let file_len = match file.metadata() {
+        Ok(m) => m.len(),
+        Err(_) => return None,
+    };
+
+    if file_len == 0 {
+        return None;
+    }
+
+    let chunk_start = file_len.saturating_sub(CHUNK_SIZE as u64);
+    let read_len = (file_len - chunk_start) as usize;
+
+    if file.seek(SeekFrom::Start(chunk_start)).is_err() {
+        return None;
+    }
+
+    let mut buf = vec![0u8; read_len];
+    if file.read_exact(&mut buf).is_err() {
+        return None;
+    }
+
+    let lines: Vec<&[u8]> = buf.split(|&b| b == b'\n').collect();
+
+    for line in lines.into_iter().rev() {
+        if line.is_empty() || line.iter().all(|b| b.is_ascii_whitespace()) {
+            continue;
+        }
+
+        if let Ok(line_str) = std::str::from_utf8(line) {
+            if let Ok(step) = serde_json::from_str::<TranscriptStep>(line_str.trim()) {
+                let st = step.step_type.as_deref().unwrap_or("");
+                if st == "EPHEMERAL_MESSAGE" || st == "SYSTEM_SDK" {
+                    continue;
+                }
+
+                if st == "GENERIC" {
+                    let content_str = match step.content {
+                        Some(serde_json::Value::String(ref s)) => s.as_str(),
+                        _ => "",
+                    };
+
+                    if content_str.contains("Showing lines ") {
+                        if let Some(inv) = SliceInvariants::detect_from_read_output(content_str) {
+                            return Some(inv.format_hint());
+                        }
+                    }
+                    return None;
+                }
+
+                return None;
+            }
+        }
+    }
+
+    None
 }
 
 // ─── PreToolUse CRLF & BOM Auto-Normalizer ───────────────────────────────────
@@ -692,6 +841,9 @@ fn main() {
                     println!("Last Output     : {} tokens ({})", output, human_format(output));
                     println!("Limit           : {} tokens ({})", cfg.context_limit, human_format(cfg.context_limit));
                     println!("Message         : {}", msg);
+                    if let Some(hint) = probe_recent_read_invariants(p) {
+                        println!("Target Invariant: {}", hint);
+                    }
                 } else {
                     eprintln!("Error: missing transcript path for --probe");
                 }
@@ -750,7 +902,12 @@ fn main() {
 
     let (cfg, _) = load_config(ws_root);
     let (used_tokens, _) = probe_transcript_tokens(transcript_path);
-    let message = build_semantic_message(used_tokens, &cfg);
+    let mut message = build_semantic_message(used_tokens, &cfg);
+
+    if let Some(hint) = probe_recent_read_invariants(transcript_path) {
+        message.push(' ');
+        message.push_str(&hint);
+    }
 
     let output = HookOutput {
         inject_steps: vec![InjectStep {
@@ -991,5 +1148,39 @@ mod tests {
             aligned,
             Some("import json\r\n\r\nfrom fastapi import APIRouter".to_string())
         );
+    }
+
+    #[test]
+    fn test_slice_invariants_real_world_case() {
+        let content = "Showing lines 56-62 of 322\n56:    - Use spatial directional anchors\n57:    - [geo label] is transparent\n58:    - ONLY when a label sits directly on top of a solid line\n59:    - CRITICAL SYNTAX GUARD: NEVER put midway or sloped inside a standalone \\\\node at (...)!\n60:    - Angle Arcs: ALWAYS specify explicit physical units\n61: 3. Language & Character Set Discipline:\n62:    - ALL node labels, annotations ($A$, $B$, \\\\theta)";
+        let inv = SliceInvariants::detect_from_read_output(content).expect("Should detect invariants");
+        assert_eq!(inv.odd_indents, vec![3]);
+        assert!(inv.has_double_backslashes);
+        assert!(!inv.has_tabs);
+        let hint = inv.format_hint();
+        assert!(hint.contains("3-space indent"));
+        assert!(hint.contains(r"\\ escape"));
+    }
+
+    #[test]
+    fn test_slice_invariants_standard_clean_code() {
+        let py_content = "Showing lines 10-15 of 100\n10: def compute_total(items):\n11:     total = 0\n12:     for item in items:\n13:         total += item.price\n14:     return total\n";
+        assert_eq!(SliceInvariants::detect_from_read_output(py_content), None);
+
+        let ts_content = "Showing lines 1-4 of 50\n1: export function add(a: number, b: number): number {\n2:   return a + b;\n3: }\n";
+        assert_eq!(SliceInvariants::detect_from_read_output(ts_content), None);
+    }
+
+    #[test]
+    fn test_slice_invariants_tabs_and_trailing() {
+        let tab_content = "Showing lines 1-2 of 10\n1:\tfunc main() {\n2:\t\tprintln(\"hello\")\n";
+        let inv = SliceInvariants::detect_from_read_output(tab_content).expect("Should detect tabs");
+        assert!(inv.has_tabs);
+        assert!(inv.format_hint().contains(r"tab (\t) indent"));
+
+        let trailing_content = "Showing lines 1-2 of 10\n1:    line with trailing space   \n2:    normal line\n";
+        let inv2 = SliceInvariants::detect_from_read_output(trailing_content).expect("Should detect trailing ws");
+        assert!(inv2.has_trailing_ws);
+        assert!(inv2.format_hint().contains("trailing whitespace"));
     }
 }
