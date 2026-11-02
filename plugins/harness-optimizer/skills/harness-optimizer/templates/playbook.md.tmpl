@@ -1,0 +1,37 @@
+# Harness Optimizer Playbook & Learned Heuristics
+
+This playbook records empirically verified optimization rules, successful refactoring patterns, and observed regression traps for the current project. Consult this document before each mutation step.
+
+---
+
+## 1. Project-Specific Invariants & Contracts
+
+- **Frozen Public Interfaces**: List public signatures, CLI flags, or API formats that must never change.
+- **Resource Limits**: Max memory ceiling, latency budget, or timeout limits.
+
+---
+
+## 2. Winning Hypotheses & Effective Patterns
+
+*(Append verified changes that reduced composite loss)*
+
+- `[Epoch 1]`: Replaced quadratic lookup with dictionary hash index -> Latency reduced by 45%.
+- `[Epoch 2]`: Added memoization cache to recursive sub-problem -> Eliminated duplicate subtree computation.
+
+---
+
+## 3. Regression Traps & Negative Heuristics
+
+*(Append hypotheses that triggered rollbacks or compile errors to prevent repetitive attempts)*
+
+- `[Trap - Avoid]`: Modifying type signatures in `core/types.py` broke external consumer modules.
+- `[Trap - Avoid]`: Inline regex parsing caused catastrophic backtracking on large inputs; prefer tokenizer.
+
+---
+
+## 4. Meta-Loop Evolution Log
+
+*(Record curriculum shifts or harness adjustments)*
+
+- `[Curriculum Stage 1]`: Functional correctness converged (pass_rate: 1.0).
+- `[Curriculum Stage 2]`: Shifted loss weights to focus 80% on latency and memory footprint.

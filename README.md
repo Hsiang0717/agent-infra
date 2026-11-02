@@ -24,6 +24,7 @@ license: MIT
   * [agy-context-monitor](plugins/agy-context-monitor/): Rust 原生開發之極速 Context 監控 Hook（`PreInvocation`），於推論前反向探測 Transcript Token 吞吐（< 1ms），並依據 256k 額度注入三級語意姿態提示（NOMINAL / TIGHT / CRITICAL），實現零數字干擾的動態收斂引導。
   * [agy-handoff](plugins/agy-handoff/): Rust 原生開發的高密度 Session 軌跡交接外掛，自動打包當前上下文並寫入系統剪貼簿。
   * [git-agent-flow](plugins/git-agent-flow/): AAEP 原生輕量化 Conventional Commit 與分支保護工作流外掛，強制 main 主幹保護、專案風格自適應探測、非交互式歷史整頓與 `/smart-commit` 原生 Git 意圖聚類提交。
+  * [harness-optimizer](plugins/harness-optimizer/): 遞迴式程式碼、演算法、Prompt 與評估 Harness 優化外掛（靈感源自 Google Research Harness2），具備前置審計防呆門禁、黑箱資料集隔離、複合損失函數、語意梯度突變與雙層 Subagent Context 防火牆隔離訓練架構。
   * [screen-capture](plugins/screen-capture/): Rust + Windows Graphics Capture (WGC) 原生高解析螢幕與視窗擷取工具，專供 Agent 進行多模態 UI 視覺驗證閉環。
 * **[profile/](profile/)**: Agent-Native CLI 工具鏈與 PowerShell Profile 擴充。
   * [README.md](profile/README.md): 外部相依清單（winget）、原生 CLI 分工矩陣與 Helper 說明。

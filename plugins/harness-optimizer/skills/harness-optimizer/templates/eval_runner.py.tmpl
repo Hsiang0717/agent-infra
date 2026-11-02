@@ -1,0 +1,150 @@
+#!/usr/bin/env python3
+"""Standard Black-Box Evaluation Runner Template for Harness Optimizer.
+
+This runner executes the evaluation suite internally, calculates the composite loss,
+extracts sanitized semantic gradients, and outputs structured JSON to stdout.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+
+def run_internal_tests(timeout_sec: int = 30) -> tuple[int, int, float, list[str]]:
+    """Execute the project's test suite and collect sanitized metrics.
+
+    Returns:
+        (passed_count, failed_count, duration_ms, sanitized_gradients)
+    """
+    start_time = time.perf_counter()
+    sanitized_gradients: list[str] = []
+
+    # Example: Run pytest with minimal output and capture exit code / output
+    # Adjust command to target project's test command (e.g. ['pytest', '-q', '--tb=short'])
+    cmd = [sys.executable, "-m", "unittest", "discover", "-s", "tests", "-q"]
+
+    try:
+        proc = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=timeout_sec,
+            check=False,
+        )
+        duration_ms = round((time.perf_counter() - start_time) * 1000, 2)
+
+        # Parse test results (customize based on test framework)
+        stderr_text = proc.stderr or proc.stdout or ""
+        if proc.returncode == 0:
+            passed_count = 10  # adjust to actual count or parsed output
+            failed_count = 0
+        else:
+            # Extract high-level failure signatures without leaking dataset content
+            lines = stderr_text.strip().splitlines()
+            for line in lines:
+                if any(err_key in line for err_key in ("FAIL:", "ERROR:", "AssertionError", "ZeroDivisionError", "KeyError")):
+                    sanitized_gradients.append(line.strip()[:160])
+            failed_count = max(1, len(sanitized_gradients))
+            passed_count = max(0, 10 - failed_count)
+
+        return passed_count, failed_count, duration_ms, sanitized_gradients[:5]
+
+    except subprocess.TimeoutExpired:
+        duration_ms = round(timeout_sec * 1000, 2)
+        sanitized_gradients.append(f"Execution timeout exceeded ({timeout_sec}s)")
+        return 0, 10, duration_ms, sanitized_gradients
+
+
+def get_git_diff_lines() -> int:
+    """Calculate the number of changed lines in the current working tree."""
+    try:
+        res = subprocess.run(
+            ["git", "diff", "--shortstat"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        out = res.stdout.strip()
+        # Format: "X files changed, Y insertions(+), Z deletions(-)"
+        insertions = 0
+        deletions = 0
+        for part in out.split(","):
+            if "insertion" in part:
+                insertions = int("".join(filter(str.isdigit, part)))
+            elif "deletion" in part:
+                deletions = int("".join(filter(str.isdigit, part)))
+        return insertions + deletions
+    except Exception:
+        return 0
+
+
+def compute_composite_loss(
+    failed_count: int,
+    total_count: int,
+    latency_ms: float,
+    diff_lines: int,
+    weights: dict[str, float],
+) -> float:
+    """Compute normalized composite loss."""
+    fail_rate = (failed_count / max(1, total_count))
+    latency_norm = min(1.0, latency_ms / 10000.0)
+    complexity_norm = min(1.0, diff_lines / 100.0)
+
+    w_fail = weights.get("test_failure_rate", 0.70)
+    w_lat = weights.get("latency_penalty", 0.20)
+    w_diff = weights.get("diff_complexity_penalty", 0.10)
+
+    total_weight = w_fail + w_lat + w_diff
+    raw_loss = (w_fail * fail_rate) + (w_lat * latency_norm) + (w_diff * complexity_norm)
+    return round(raw_loss / total_weight, 4)
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Harness Evaluation Runner")
+    parser.add_argument("--epoch", type=int, default=0, help="Current training epoch index")
+    parser.add_argument("--config", type=str, default=".harness/config.json", help="Config file path")
+    args = parser.parse_args()
+
+    # Load config weights
+    config_path = Path(args.config)
+    weights = {"test_failure_rate": 0.70, "latency_penalty": 0.20, "diff_complexity_penalty": 0.10}
+    timeout_sec = 30
+
+    if config_path.exists():
+        try:
+            with open(config_path, "r", encoding="utf-8") as f:
+                cfg = json.load(f)
+                weights = cfg.get("loss_weights", weights)
+                timeout_sec = cfg.get("constraints", {}).get("timeout_seconds_per_run", timeout_sec)
+        except Exception:
+            pass
+
+    passed, failed, latency_ms, gradients = run_internal_tests(timeout_sec=timeout_sec)
+    total_tests = passed + failed
+    pass_rate = round(passed / max(1, total_tests), 4)
+    diff_lines = get_git_diff_lines()
+
+    loss = compute_composite_loss(failed, total_tests, latency_ms, diff_lines, weights)
+
+    metric_output = {
+        "epoch": args.epoch,
+        "composite_loss": loss,
+        "pass_rate": pass_rate,
+        "failed_count": failed,
+        "passed_count": passed,
+        "latency_ms": latency_ms,
+        "diff_lines": diff_lines,
+        "sanitized_gradients": gradients,
+    }
+
+    # Ensure clean JSON output on stdout (never print debug junk)
+    print(json.dumps(metric_output, indent=2))
+
+
+if __name__ == "__main__":
+    main()

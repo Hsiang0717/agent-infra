@@ -1,0 +1,4 @@
+{
+  "name": "harness-optimizer",
+  "description": "Recursive code, algorithm, prompt, and test-harness optimization framework inspired by Google Research Harness2. Features pre-flight foolproofing, black-box dataset isolation, composite loss optimization, semantic gradient mutation, and two-tier subagent context firewall execution."
+}
