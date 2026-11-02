@@ -19,7 +19,7 @@ User (Minimal Intervention: Only provides missing oracle/assets if blocked)
 Main Agent (Orchestrator)
   ├── Phase 0: Autonomous Pre-Flight Discovery & Strategy Synthesis (Zero-Friction)
   ├── Phase 1: 5-Step Scaffolding, Probe Certification & Dual Baseline Lock (Train + Holdout)
-  ├── Phase 2 (Delegated): invoke_subagent(TypeName: "self", Role: "Harness Training Worker")
+  ├── Phase 2 (Delegated): invoke_subagent(TypeName: "harness-worker", Role: "Harness Training Worker")
   │     └── [Context Firewall]: Single-Pass Epochs 1..N (Mutate -> Eval -> Commit / Clean-Rollback)
   └── Phase 3: Blind Holdout Verification, Artifact Gallery Audit & Playbook Distillation
 ```
@@ -103,11 +103,11 @@ Follow this exact 5-step sequence. **Modifying project source code is strictly f
 ## Phase 2: Single-Pass Task-Level Training Loop (Context Firewall)
 
 ### Delegating to Worker Subagent (`max_epochs >= 3`)
-Invoke the `self` subagent to shield the primary context window:
+Invoke the bundled `harness-worker` custom subagent (defined in `agents/harness-worker.md`, or fallback to `self`) to shield the primary context window:
 
 ```markdown
 invoke_subagent(
-  TypeName: "self",
+  TypeName: "harness-worker",
   Role: "Harness Training Worker",
   Prompt: "Execute autonomous Harness training loop on branch harness/<topic>. Config: .harness/config.json. Baseline metrics: .harness/baseline.json (initial best_loss: <epoch_0_train_loss>). Execute Epochs 1 to <max_epochs> using the Single-Pass Epoch Cycle (Backward Gradient Analysis -> Bounded Mutation in mutable_paths -> Forward Eval -> Atomic Commit or Clean Rollback). Enforce min_improvement_delta and never touch frozen_interfaces or read holdout datasets. Return a dense Markdown summary reporting: (1) Epoch 0 vs Best Train metrics, (2) Commit log, (3) Distilled heuristics in .harness/playbook.md."
 )

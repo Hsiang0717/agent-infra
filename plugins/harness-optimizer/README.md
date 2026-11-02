@@ -68,6 +68,8 @@ flowchart TD
 plugins/harness-optimizer/
 ├── plugin.json                 # 外掛宣告清單 (Agent-Native Autonomous Edition)
 ├── README.md                   # 外掛架構與操作指南
+├── agents/
+│   └── harness-worker.md       # [專屬 Subagent] 封裝 Phase 2 訓練迴圈、Tier-1 熔斷與無殘留回滾之專用 Worker
 ├── rules/
 │   └── AGENTS.md               # [規則] 自主執行邊界、5-Step 認證閘門、防過擬合與無殘留回滾硬規範
 └── skills/

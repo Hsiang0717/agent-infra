@@ -74,7 +74,7 @@ This protocol governs autonomous iterative code, algorithm, prompt, and test-har
   - **Owns Phase 0 & Phase 1**: Conducts autonomous pre-flight discovery, synthesizes `.harness/`, certifies the 5-Step Probe Gate, and locks Epoch 0 Train + Holdout baselines.
   - **Owns Phase 3 Closure**: Runs Holdout Generalization verification, inspects the Artifact Gallery (`--gallery`), distills `.harness/playbook.md`, and presents the final Executive Report.
 - **Subagent (Training Worker)**:
-  - **Owns Phase 2 (`max_epochs >= 3`)**: Main Agent delegates the multi-epoch loop via `invoke_subagent(TypeName: "self", Role: "Harness Training Worker")` on branch `harness/<topic>`.
+  - **Owns Phase 2 (`max_epochs >= 3`)**: Main Agent delegates the multi-epoch loop via `invoke_subagent(TypeName: "harness-worker", Role: "Harness Training Worker")` (bundled in `agents/harness-worker.md`, or `self`) on branch `harness/<topic>`.
   - **Context Firewall**: Intermediate test traces and rollback churn stay inside the subagent session; only the structured summary matrix is returned.
 
 ---
