@@ -16,8 +16,7 @@ license: MIT
   * [GEMINI.md](agents/GEMINI.md): **自主工程代理協議 (AAEP - Autonomous Agent Engineering Protocol)**。基於「自主掌舵、崇尚實證、極致克制」四大生命週期階段（事實查證與層級探索、審慎設計與先抽後建、低開銷外科手術修改、真機與多模態實證驗證），並深度整合 Context 語意動態姿態（NOMINAL / TIGHT / CRITICAL）。
   * [Karpathy.md](agents/Karpathy.md): 通用 LLM 編碼行為準則（Claude / Karpathy 風格）。
 * **[rules/](rules/)**: 全域與環境硬規則（`trigger: always_on`）。
-  * [cli_toolchain.md](rules/cli_toolchain.md): Windows pwsh 執行規範、Agent-Native CLI 工具鏈（`rg`, `fd`, `jq`, `outline`）與高密度壓縮輔助指令（`lsj`, `topj`, `pingj`, `portj`, `psj`, `killp`）。
-  * [python_uv.md](rules/python_uv.md): 系統 Python 與 `uv` 工具鏈強制規範。
+  * [python_uv.md](rules/python_uv.md): 系統 Python 與 `uv` 工具鏈強制規範。（註：CLI 工具鏈規範已全面整併至 [agy-enhancer](plugins/agy-enhancer/rules/CLI_TOOLCHAIN.md) 旗艦外掛中，避免全域雙重載入）。
 * **[docs/](docs/)**: 設計哲學與架構演進文檔。
   * [GEMINI_DESIGN_RATIONALE.md](docs/GEMINI_DESIGN_RATIONALE.md): **GEMINI.md 設計哲學與架構演進全紀錄**。詳細記錄為何拋棄「防守拘束器」、Context 經濟學、多模態閉環與各極端情境決策邊界，供後續迭代延續理念。
 * **[plugins/](plugins/)**: 外掛整合套件（Antigravity Plugins）。
