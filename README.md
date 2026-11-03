@@ -21,7 +21,7 @@ license: MIT
 * **[docs/](docs/)**: 設計哲學與架構演進文檔。
   * [GEMINI_DESIGN_RATIONALE.md](docs/GEMINI_DESIGN_RATIONALE.md): **GEMINI.md 設計哲學與架構演進全紀錄**。詳細記錄為何拋棄「防守拘束器」、Context 經濟學、多模態閉環與各極端情境決策邊界，供後續迭代延續理念。
 * **[plugins/](plugins/)**: 外掛整合套件（Antigravity Plugins）。
-  * [agy-context-monitor](plugins/agy-context-monitor/): Rust 原生開發之極速 Context 監控 Hook（`PreInvocation`），於推論前反向探測 Transcript Token 吞吐（< 1ms），並依據 256k 額度注入三級語意姿態提示（NOMINAL / TIGHT / CRITICAL），實現零數字干擾的動態收斂引導。
+  * [agy-enhancer](plugins/agy-enhancer/): Rust 原生開發之 Agent 執行期增強核心（`PreInvocation` / `PreToolUse`），於推論前反向探測 Token 吞吐注入語意姿態提示（NOMINAL / TIGHT / CRITICAL）、感知代碼縮排與跳脫不變量、喚醒 `.agents/memory/` 實證記憶雷達，並於工具調用前執行 CRLF 正規化與參數自愈修復。
   * [agy-handoff](plugins/agy-handoff/): Rust 原生開發的高密度 Session 軌跡交接外掛，自動打包當前上下文並寫入系統剪貼簿。
   * [git-agent-flow](plugins/git-agent-flow/): AAEP 原生輕量化 Conventional Commit 與分支保護工作流外掛，強制 main 主幹保護、專案風格自適應探測、非交互式歷史整頓與 `/smart-commit` 原生 Git 意圖聚類提交。
   * [harness-optimizer](plugins/harness-optimizer/): 遞迴式程式碼、演算法、Prompt 與評估 Harness 優化外掛（靈感源自 Google Research Harness2），具備前置審計防呆門禁、黑箱資料集隔離、複合損失函數、語意梯度突變與雙層 Subagent Context 防火牆隔離訓練架構。

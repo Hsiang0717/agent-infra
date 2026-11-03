@@ -15,6 +15,22 @@ const CHUNK_SIZE: usize = 64 * 1024;
 // ─── Configuration Structures ───────────────────────────────────────────────
 
 #[derive(Deserialize, Serialize, Debug, Clone)]
+pub struct MemoryRadarConfig {
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+}
+
+impl Default for MemoryRadarConfig {
+    fn default() -> Self {
+        Self { enabled: true }
+    }
+}
+
+fn default_true() -> bool {
+    true
+}
+
+#[derive(Deserialize, Serialize, Debug, Clone)]
 pub struct MonitorConfig {
     #[serde(default = "default_context_limit")]
     pub context_limit: u64,
@@ -22,6 +38,8 @@ pub struct MonitorConfig {
     pub thresholds: ThresholdConfig,
     #[serde(default)]
     pub messages: MessagesConfig,
+    #[serde(default)]
+    pub memory_radar: MemoryRadarConfig,
 }
 
 impl Default for MonitorConfig {
@@ -30,6 +48,7 @@ impl Default for MonitorConfig {
             context_limit: default_context_limit(),
             thresholds: ThresholdConfig::default(),
             messages: MessagesConfig::default(),
+            memory_radar: MemoryRadarConfig::default(),
         }
     }
 }
@@ -100,11 +119,15 @@ fn default_critical_message() -> String {
 pub fn load_config(workspace_root: Option<&Path>) -> (MonitorConfig, Option<PathBuf>) {
     let mut candidates = Vec::new();
 
-    // 1. Workspace override (.agents/context-monitor.json or plugins/agy-context-monitor/config.json)
+    // 1. Workspace override (.agents/enhancer.json, .agents/context-monitor.json, etc.)
     if let Some(ws) = workspace_root {
+        candidates.push(ws.join(".agents").join("enhancer.json"));
+        candidates.push(ws.join(".agents").join("enhancer").join("config.json"));
         candidates.push(ws.join(".agents").join("context-monitor.json"));
         candidates.push(ws.join(".agents").join("context-monitor").join("config.json"));
+        candidates.push(ws.join("plugins").join("agy-enhancer").join("config.json"));
         candidates.push(ws.join("plugins").join("agy-context-monitor").join("config.json"));
+        candidates.push(ws.join("enhancer.json"));
         candidates.push(ws.join("context-monitor.json"));
     }
 
@@ -118,16 +141,11 @@ pub fn load_config(workspace_root: Option<&Path>) -> (MonitorConfig, Option<Path
         }
     }
 
-    // 3. Global user configuration (~/.gemini/config/plugins/agy-context-monitor/config.json)
+    // 3. Global user configuration (~/.gemini/config/plugins/agy-enhancer/config.json, fallback to agy-context-monitor)
     if let Ok(home) = env::var("USERPROFILE").or_else(|_| env::var("HOME")) {
-        candidates.push(
-            PathBuf::from(home)
-                .join(".gemini")
-                .join("config")
-                .join("plugins")
-                .join("agy-context-monitor")
-                .join("config.json"),
-        );
+        let global_base = PathBuf::from(home).join(".gemini").join("config").join("plugins");
+        candidates.push(global_base.join("agy-enhancer").join("config.json"));
+        candidates.push(global_base.join("agy-context-monitor").join("config.json"));
     }
 
     for path in candidates {
@@ -521,6 +539,67 @@ pub fn probe_recent_read_invariants(path: &Path) -> Option<String> {
     None
 }
 
+// ─── Epistemic Memory Radar ──────────────────────────────────────────────────
+
+/// Probes workspace `.agents/memory/` and `.agents/memory/pitfalls.md` to awaken the model's awareness.
+/// Returns a formatted ephemeral hint, e.g.:
+/// `[Project Memory: active (.agents/memory/pitfalls.md - 2 entries; query via rg)]`
+/// or `[Project Memory: ready (.agents/memory/pitfalls.md; distill non-obvious traps)]`
+pub fn probe_project_memory(workspace_root: Option<&Path>) -> Option<String> {
+    let ws = workspace_root?;
+    let memory_dir = ws.join(".agents").join("memory");
+    if !memory_dir.exists() {
+        return None;
+    }
+
+    let pitfalls_path = memory_dir.join("pitfalls.md");
+    if pitfalls_path.is_file() {
+        if let Ok(content) = std::fs::read_to_string(&pitfalls_path) {
+            let mut entries = 0;
+            for line in content.lines() {
+                let trimmed = line.trim_start();
+                if trimmed.starts_with("- **`[")
+                    || trimmed.starts_with("- **[")
+                    || trimmed.starts_with("- `[")
+                    || trimmed.starts_with("- [")
+                    || trimmed.starts_with("* **`[")
+                    || trimmed.starts_with("* **[")
+                    || trimmed.starts_with("* `[")
+                    || trimmed.starts_with("* [")
+                    || (trimmed.starts_with('[') && trimmed.contains("]:"))
+                {
+                    entries += 1;
+                }
+            }
+            if entries > 0 {
+                return Some(format!(
+                    "[Project Memory: active (.agents/memory/pitfalls.md - {} entries; query via rg)]",
+                    entries
+                ));
+            } else {
+                return Some("[Project Memory: ready (.agents/memory/pitfalls.md; distill non-obvious traps)]".to_string());
+            }
+        }
+    }
+
+    if let Ok(read_dir) = std::fs::read_dir(&memory_dir) {
+        let mut count = 0;
+        for entry in read_dir.flatten() {
+            if entry.path().is_file() {
+                count += 1;
+            }
+        }
+        if count > 0 {
+            return Some(format!(
+                "[Project Memory: active (.agents/memory/ - {} files; query via rg)]",
+                count
+            ));
+        }
+    }
+
+    Some("[Project Memory: ready (.agents/memory/pitfalls.md; distill non-obvious traps)]".to_string())
+}
+
 // ─── PreToolUse CRLF & BOM Auto-Normalizer ───────────────────────────────────
 
 pub fn normalize_file_crlf_if_needed(path: &Path) -> bool {
@@ -807,18 +886,19 @@ fn main() {
                 return;
             }
             "--help" | "-h" => {
-                println!("agy-context-monitor v0.1.0 (Native Context & PreToolUse Hook)");
+                println!("agy-enhancer v0.2.0 (Agent-Native Runtime Enhancer Core)");
                 println!("Usage:");
-                println!("  agy-context-monitor                   Run as PreInvocation hook (reads stdin)");
-                println!("  agy-context-monitor --pre-edit        Run as PreToolUse edit_file CRLF normalizer");
-                println!("  agy-context-monitor --config          Print currently resolved configuration");
-                println!("  agy-context-monitor --probe <file>    Probe token counts from transcript file");
-                println!("  agy-context-monitor --simulate <num>  Simulate semantic message for token count");
-                println!("  agy-context-monitor --version         Show version");
+                println!("  agy-enhancer                   Run as PreInvocation hook (reads stdin)");
+                println!("  agy-enhancer --pre-edit        Run as PreToolUse edit_file auto-sanitizer/normalizer");
+                println!("  agy-enhancer --config          Print currently resolved configuration");
+                println!("  agy-enhancer --probe <file>    Probe token counts and invariants from transcript file");
+                println!("  agy-enhancer --simulate <num>  Simulate semantic message for token count");
+                println!("  agy-enhancer --memory [dir]    Inspect project epistemic memory radar");
+                println!("  agy-enhancer --version         Show version");
                 return;
             }
             "--version" | "-v" => {
-                println!("agy-context-monitor 0.1.0");
+                println!("agy-enhancer 0.2.0");
                 return;
             }
             "--config" => {
@@ -858,6 +938,19 @@ fn main() {
                     println!("Message: {}", msg);
                 } else {
                     eprintln!("Error: missing token count for --simulate");
+                }
+                return;
+            }
+            "--memory" => {
+                let target_dir = args.get(2).map(PathBuf::from).unwrap_or_else(|| {
+                    env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
+                });
+                let hint = probe_project_memory(Some(&target_dir));
+                println!("Inspecting Project Memory at: {}", target_dir.display());
+                if let Some(h) = hint {
+                    println!("Memory Radar Output: {}", h);
+                } else {
+                    println!("Memory Radar Output: (None - .agents/memory/ directory not present)");
                 }
                 return;
             }
@@ -907,6 +1000,13 @@ fn main() {
     if let Some(hint) = probe_recent_read_invariants(transcript_path) {
         message.push(' ');
         message.push_str(&hint);
+    }
+
+    if cfg.memory_radar.enabled {
+        if let Some(mem_hint) = probe_project_memory(ws_root) {
+            message.push(' ');
+            message.push_str(&mem_hint);
+        }
     }
 
     let output = HookOutput {
@@ -1182,5 +1282,29 @@ mod tests {
         let inv2 = SliceInvariants::detect_from_read_output(trailing_content).expect("Should detect trailing ws");
         assert!(inv2.has_trailing_ws);
         assert!(inv2.format_hint().contains("trailing whitespace"));
+    }
+
+    #[test]
+    fn test_probe_project_memory_cases() {
+        let temp_dir = env::temp_dir().join(format!("test_mem_radar_{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        std::fs::create_dir_all(&temp_dir).unwrap();
+
+        // Case 1: No .agents/memory dir -> None
+        assert_eq!(probe_project_memory(Some(&temp_dir)), None);
+
+        // Case 2: .agents/memory exists but empty
+        let mem_dir = temp_dir.join(".agents").join("memory");
+        std::fs::create_dir_all(&mem_dir).unwrap();
+        let hint_ready = probe_project_memory(Some(&temp_dir)).expect("Should return ready hint");
+        assert!(hint_ready.contains("Project Memory: ready"));
+
+        // Case 3: pitfalls.md exists with 2 entries
+        let pitfalls = mem_dir.join("pitfalls.md");
+        std::fs::write(&pitfalls, "# Pitfalls\n\n- [Windows]: CRLF issue ➔ Normalize file\n- [Git]: Avoid rebase -i ➔ Soft reset\n").unwrap();
+        let hint_active = probe_project_memory(Some(&temp_dir)).expect("Should return active hint");
+        assert!(hint_active.contains("Project Memory: active"));
+        assert!(hint_active.contains("2 entries"));
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
     }
 }

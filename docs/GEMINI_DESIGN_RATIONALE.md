@@ -46,7 +46,7 @@ Antigravity (AGY) 是定位於 **Staff Software Engineer（資深主任軟體工
 - **演進決策**：
   - **全面統整為 CLI 原生工具名**：環境已全面收斂至純 `agy cli`，協議與外掛中全面廢除舊版 IDE 工具名稱（`view_file`、`replace_file_content`、`write_to_file`），100% 統一為 CLI 宣告的原生工具（`read_file`、`edit_file`、`write_file`），徹底消除別名干擾。
   - **漏斗探索首位錨定**：於 `rules/cli_toolchain.md` 第一條明確將 `lsj [path]` / `topj` 置於目錄探索首位，並將 `Get-ChildItem`、`dir`、`ls`、`tree`、`Select-String` 列入明確禁令；同時規範 `rg -n <pattern> <path>` 必填搜尋路徑以杜絕非 TTY 掛起。
-  - **編輯前 CRLF 物理正規化與切片完整性**：針對 Windows 下外部生成的 CRLF (`\r\n`) 檔案導致 `edit_file` 匹配失敗，於 `agy-context-monitor` 掛載 `PreToolUse` (`edit_file`) 自動正規化 Hook，並於 `GEMINI.md` 強調 `Target` 必須取自單一連續 `read_file` 切片（嚴禁由搜尋片段拼接）。
+  - **編輯前 CRLF 物理正規化與切片完整性**：針對 Windows 下外部生成的 CRLF (`\r\n`) 檔案導致 `edit_file` 匹配失敗，於 `agy-enhancer` 掛載 `PreToolUse` (`edit_file`) 自動正規化與自愈修復 Hook，並於 `GEMINI.md` 強調 `Target` 必須取自單一連續 `read_file` 切片（嚴禁由搜尋片段拼接）。
 
 ### 4. 「字串替換鐘擺陷阱」的校準 (The Edit Pendulum: Oversized Target vs. Global Mass-Corruption)
 - **歷史教訓**：模型在遭遇 `edit_file` 比對失敗時，常陷入雙重極端：

@@ -7,13 +7,13 @@ param(
 $ErrorActionPreference = 'Stop'
 
 $pluginRoot = $PSScriptRoot
-$releaseExe = Join-Path $pluginRoot 'target\release\agy-context-monitor.exe'
+$releaseExe = Join-Path $pluginRoot 'target\release\agy-enhancer.exe'
 $binDir = Join-Path $pluginRoot 'bin'
-$localBinExe = Join-Path $binDir 'agy-context-monitor.exe'
+$localBinExe = Join-Path $binDir 'agy-enhancer.exe'
 
 # 1. 編譯 (若指定 -Build 或 release 執行檔不存在)
 if ($Build -or (-not (Test-Path -LiteralPath $releaseExe -PathType Leaf))) {
-    Write-Host "[Build] Compiling agy-context-monitor in release mode..." -ForegroundColor Cyan
+    Write-Host "[Build] Compiling agy-enhancer in release mode..." -ForegroundColor Cyan
     Push-Location $pluginRoot
     try {
         cargo build --release
@@ -40,11 +40,11 @@ if ($PSCmdlet.ShouldProcess($localBinExe, 'Copy compiled binary to local bin')) 
     Write-Host "[Local] Deployed binary to $localBinExe" -ForegroundColor Green
 }
 
-# 3. 若指定 -Global，則同步至全域外掛目錄 (~/.gemini/config/plugins/agy-context-monitor)
+# 3. 若指定 -Global，則同步至全域外掛目錄 (~/.gemini/config/plugins/agy-enhancer)
 if ($Global) {
-    $globalPluginDir = Join-Path $env:USERPROFILE '.gemini\config\plugins\agy-context-monitor'
+    $globalPluginDir = Join-Path $env:USERPROFILE '.gemini\config\plugins\agy-enhancer'
     $globalBinDir = Join-Path $globalPluginDir 'bin'
-    $globalBinExe = Join-Path $globalBinDir 'agy-context-monitor.exe'
+    $globalBinExe = Join-Path $globalBinDir 'agy-enhancer.exe'
 
     if ($PSCmdlet.ShouldProcess($globalPluginDir, 'Install plugin globally')) {
         if (-not (Test-Path -LiteralPath $globalBinDir)) {
@@ -61,4 +61,4 @@ if ($Global) {
     }
 }
 
-Write-Host "agy-context-monitor is ready!" -ForegroundColor Cyan
+Write-Host "agy-enhancer is ready!" -ForegroundColor Cyan

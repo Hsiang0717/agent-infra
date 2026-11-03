@@ -8,5 +8,8 @@
     "nominal": "[Context Posture: NOMINAL]",
     "tight": "[Context Posture: TIGHT] Scope read_file directly to target edit sites (never guess unread targets); verify & converge.",
     "critical": "[Context Posture: CRITICAL] Halt new exploration; finish active atomic edit_file, verify, and invoke /compact || /handoff."
+  },
+  "memory_radar": {
+    "enabled": true
   }
 }
