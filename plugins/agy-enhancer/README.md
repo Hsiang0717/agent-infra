@@ -1,6 +1,17 @@
-# agy-enhancer (原生 Rust Agent 執行期增強核心)
+# agy-enhancer (Agent 執行期增強旗艦套件 / AAEP Runtime Suite)
 
-為 Google Antigravity CLI 打造的高效能原生 Runtime Enhancer Core，以純 Rust 打造，在每次 Agent 推論前（`PreInvocation`）與工具調用前（`PreToolUse`）以 < 1ms 的極速提供主動治理、感知增強與自愈修復。
+為 Google Antigravity CLI 打造的頂級旗艦增強套件，集結 **AAEP 自主工程協議大腦**、**Agent-Native CLI 工具鏈規則（含自愈安裝）** 與 **< 1ms Rust 原生神經中樞**。一鍵安裝即可讓 Agent 具備動態姿態調度、排版不變量感知、專案實證記憶雷達、工具調用自愈修復與環境自動配置能力。
+
+---
+
+## 套件結構組成 (Components)
+
+* **Rules (2 組內建硬規則)**：
+  * `rules/AAEP.md`：**自主工程代理協議 (AAEP)** 四階段生命週期（事實查證、先抽後建、外科編輯、實證閉環與記憶蒸餾）。
+  * `rules/CLI_TOOLCHAIN.md`：**Windows pwsh 工具鏈與自愈安裝協議**（優先使用 `lsj` / `topj` / `outline`，遭遇未安裝時主動執行環境自愈安裝，絕不低效降級）。
+* **Hooks (1 組原生 Rust 二進位中樞)**：
+  * `PreInvocation`：反向解析 Transcript 注入 `[Context Posture]`、`[Target Invariant]` 與 `[Project Memory]`。
+  * `PreToolUse` (`edit_file`)：CRLF 實體正規化、行號前綴過濾、空行容錯與 `overwrite` 參數修復。
 
 ---
 

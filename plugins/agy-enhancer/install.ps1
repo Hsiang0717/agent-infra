@@ -1,7 +1,8 @@
 [CmdletBinding(SupportsShouldProcess = $true)]
 param(
     [switch]$Build,
-    [switch]$Global
+    [switch]$Global,
+    [switch]$SetupHelpers
 )
 
 $ErrorActionPreference = 'Stop'
@@ -45,6 +46,7 @@ if ($Global) {
     $globalPluginDir = Join-Path $env:USERPROFILE '.gemini\config\plugins\agy-enhancer'
     $globalBinDir = Join-Path $globalPluginDir 'bin'
     $globalBinExe = Join-Path $globalBinDir 'agy-enhancer.exe'
+    $globalRulesDir = Join-Path $globalPluginDir 'rules'
 
     if ($PSCmdlet.ShouldProcess($globalPluginDir, 'Install plugin globally')) {
         if (-not (Test-Path -LiteralPath $globalBinDir)) {
@@ -53,6 +55,16 @@ if ($Global) {
         Copy-Item -LiteralPath $localBinExe -Destination $globalBinExe -Force
         Copy-Item -LiteralPath (Join-Path $pluginRoot 'plugin.json') -Destination (Join-Path $globalPluginDir 'plugin.json') -Force
         Copy-Item -LiteralPath (Join-Path $pluginRoot 'hooks.json') -Destination (Join-Path $globalPluginDir 'hooks.json') -Force
+
+        $rulesSrc = Join-Path $pluginRoot 'rules'
+        if (Test-Path -LiteralPath $rulesSrc) {
+            if (-not (Test-Path -LiteralPath $globalRulesDir)) {
+                New-Item -ItemType Directory -Path $globalRulesDir -Force | Out-Null
+            }
+            Copy-Item -Path (Join-Path $rulesSrc '*') -Destination $globalRulesDir -Recurse -Force
+            Write-Host "[Global] Synchronized rules (AAEP, CLI_TOOLCHAIN) to: $globalRulesDir" -ForegroundColor Cyan
+        }
+
         $globalConfig = Join-Path $globalPluginDir 'config.json'
         if (-not (Test-Path -LiteralPath $globalConfig)) {
             Copy-Item -LiteralPath (Join-Path $pluginRoot 'config.json') -Destination $globalConfig -Force
@@ -61,4 +73,14 @@ if ($Global) {
     }
 }
 
-Write-Host "agy-enhancer is ready!" -ForegroundColor Cyan
+# 4. 協助安裝 AgentHelpers 模組 (PowerShell CLI 工具鏈)
+if ($Global -or $SetupHelpers) {
+    $workspaceRoot = Split-Path -Parent (Split-Path -Parent $pluginRoot)
+    $moduleInstaller = Join-Path $workspaceRoot 'profile\install-module.ps1'
+    if (Test-Path -LiteralPath $moduleInstaller) {
+        Write-Host "[Helpers] Bootstrapping AgentHelpers PowerShell module..." -ForegroundColor Cyan
+        pwsh -NoProfile -ExecutionPolicy Bypass -File $moduleInstaller -Copy
+    }
+}
+
+Write-Host "agy-enhancer suite is ready!" -ForegroundColor Green
