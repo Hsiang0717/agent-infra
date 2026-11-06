@@ -204,6 +204,11 @@ impl Database {
         Ok(rows > 0)
     }
 
+    pub fn delete_command(&self, cmd: &str) -> Result<bool> {
+        let rows = self.conn.execute("DELETE FROM history WHERE command = ?1", params![cmd])?;
+        Ok(rows > 0)
+    }
+
     pub fn delete_last(&self) -> Result<Option<String>> {
         let mut stmt = self.conn.prepare("SELECT id, command FROM history ORDER BY id DESC LIMIT 1")?;
         let mut rows = stmt.query([])?;

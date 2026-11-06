@@ -3,6 +3,7 @@ use std::env;
 use std::path::PathBuf;
 
 mod db;
+mod inline;
 mod matcher;
 mod predictor;
 mod prober;
@@ -36,6 +37,21 @@ enum Commands {
         query: Option<String>,
 
         /// Output file path to store selected command and action
+        #[arg(short, long)]
+        output_file: Option<String>,
+    },
+
+    /// Interactive Inline Menu with 2-column layout and group tabs
+    Inline {
+        /// Working directory to contextualize search
+        #[arg(short, long)]
+        cwd: Option<String>,
+
+        /// Current command-line input to filter suggestions
+        #[arg(short, long)]
+        query: Option<String>,
+
+        /// Output file path to store selected command and action (TAB / EXEC)
         #[arg(short, long)]
         output_file: Option<String>,
     },
@@ -503,6 +519,25 @@ fn main() {
             }
         }
 
+        Commands::Inline { cwd, query, output_file } => {
+            let current_dir = match cwd {
+                Some(c) => PathBuf::from(c),
+                None => env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
+            };
+            let q = query.unwrap_or_default();
+            let out = output_file.map(PathBuf::from);
+            match inline::InlineRunner::new(&current_dir, &q, out) {
+                Ok(mut runner) => {
+                    if let Err(e) = runner.run() {
+                        eprintln!("Smart-Hub Inline error: {e}");
+                    }
+                }
+                Err(e) => {
+                    eprintln!("Failed to start Smart-Hub Inline: {e}");
+                }
+            }
+        }
+
         Commands::Predict { cwd, query } => {
             let current_dir = cwd.unwrap_or_else(|| {
                 env::current_dir()
@@ -649,7 +684,7 @@ fn main() {
                 .to_string();
 
             print!(
-                r#"if ([System.Environment]::UserInteractive -and -not [Console]::IsOutputRedirected) {{
+                r#"if ($Host.Name -eq 'ConsoleHost' -or $Host.UI.RawUI) {{
     $global:SmartHubExe = '{exe_path}'
     $smartHubDll = '{dll_path}'
 
@@ -665,54 +700,59 @@ fn main() {
 
     if ('SmartHub.SmartHubBridge' -as [type]) {{
         [SmartHub.SmartHubBridge]::RegisterAll($global:SmartHubExe, $ExecutionContext.SessionState.Path)
-        Set-PSReadLineOption -PredictionSource Plugin
+        Set-PSReadLineOption -PredictionSource HistoryAndPlugin -ErrorAction SilentlyContinue
     }} else {{
-        Set-PSReadLineOption -PredictionSource HistoryAndPlugin
+        Set-PSReadLineOption -PredictionSource HistoryAndPlugin -ErrorAction SilentlyContinue
     }}
 
-    # 2. 原生下方浮動清單 (ListView) - 隨打隨提示，不搶焦點
-    Set-PSReadLineOption -PredictionViewStyle ListView
-    Set-PSReadLineOption -Colors @{{ InlinePrediction = "$([char]0x1b)[38;5;245m" }}
-    Set-PSReadLineOption -MaximumHistoryCount 30000
-    Set-PSReadLineOption -HistoryNoDuplicates
-    Set-PSReadLineOption -HistorySearchCursorMovesToEnd
+    # 2. 原生內聯預測樣式 (InlineView 微淡幽靈文字，不遮擋視野)
+    Set-PSReadLineOption -PredictionViewStyle InlineView -ErrorAction SilentlyContinue
+    Set-PSReadLineOption -Colors @{{ InlinePrediction = "$([char]0x1b)[38;5;245m" }} -ErrorAction SilentlyContinue
+    Set-PSReadLineOption -MaximumHistoryCount 30000 -ErrorAction SilentlyContinue
+    Set-PSReadLineOption -HistoryNoDuplicates -ErrorAction SilentlyContinue
+    Set-PSReadLineOption -HistorySearchCursorMovesToEnd -ErrorAction SilentlyContinue
 
-    # 3. 上下鍵與 Tab 鍵自然導覽 (Enter 執行，Tab 回填)
+    # 3. 原生命令列鍵位
     Set-PSReadLineKeyHandler -Chord "UpArrow" -Function HistorySearchBackward
-    Set-PSReadLineKeyHandler -Chord "DownArrow" -Function HistorySearchForward
     Set-PSReadLineKeyHandler -Chord "Tab" -Function TabCompleteNext
     Set-PSReadLineKeyHandler -Chord "Shift+Tab" -Function TabCompletePrevious
 
-    # 4. Alt+a: 為當前輸入之指令建立/覆蓋虛擬別名 (直接存入 SQLite，零環境污染)
-    Set-PSReadLineKeyHandler -Chord "Alt+a" -ScriptBlock {{
+    # 4. 內聯選單觸發：按 DownArrow 進入內聯選單 (左右排版、禁止原生操作)
+    Set-PSReadLineKeyHandler -Chord "DownArrow" -ScriptBlock {{
         param($key, $arg)
         $line = $null
         $cursor = $null
         [Microsoft.PowerShell.PSConsoleReadLine]::GetBufferState([ref]$line, [ref]$cursor)
-        if ($line -and -not [string]::IsNullOrWhiteSpace($line)) {{
-            $trigger = Read-Host "`n[Smart-Hub] 請輸入虛擬別名 Trigger (按 Enter 儲存/覆蓋)"
-            if ($trigger -and -not [string]::IsNullOrWhiteSpace($trigger)) {{
-                & $global:SmartHubExe alias add $trigger.Trim() $line.Trim()
-                if ('SmartHub.SmartHubBridge' -as [type]) {{
-                    [SmartHub.SmartHubBridge]::InvalidateCache()
+
+        $actFile = Join-Path $env:TEMP ("smarthub_act_" + [System.Guid]::NewGuid().ToString("N") + ".tmp")
+        $cwd = $ExecutionContext.SessionState.Path.CurrentFileSystemLocation.ProviderPath
+
+        # 啟動內聯雙態選單 (選單期間禁止原生操作)
+        & $global:SmartHubExe inline --cwd $cwd --query "$line" --output-file $actFile
+
+        if (Test-Path -LiteralPath $actFile) {{
+            $raw = Get-Content -LiteralPath $actFile -Raw -Encoding utf8
+            Remove-Item -LiteralPath $actFile -Force -ErrorAction SilentlyContinue
+            if ($raw) {{
+                $parts = $raw.Trim().Split("`t", 2)
+                if ($parts.Length -eq 2) {{
+                    $action = $parts[0]
+                    $cmd = $parts[1]
+                    if ($action -eq "TAB") {{
+                        # Tab 回填：回填到終端機命令列，恢復原生操作
+                        [Microsoft.PowerShell.PSConsoleReadLine]::Replace(0, $line.Length, $cmd)
+                        [Microsoft.PowerShell.PSConsoleReadLine]::SetCursorPosition($cmd.Length)
+                    }} elseif ($action -eq "EXEC") {{
+                        # Enter 執行：回填並直接執行
+                        [Microsoft.PowerShell.PSConsoleReadLine]::Replace(0, $line.Length, $cmd)
+                        [Microsoft.PowerShell.PSConsoleReadLine]::AcceptLine()
+                    }}
                 }}
-                Write-Host "[Smart-Hub] ✓ 已設定虛別名 [$($trigger.Trim())] ➔ $($line.Trim())" -ForegroundColor Green
             }}
         }}
-        [Microsoft.PowerShell.PSConsoleReadLine]::InvokePrompt()
     }}
 
-    # 5. Alt+Backspace: 即刻從 SQLite 歷史中刪除上一筆打錯的指令並即時刷新
-    Set-PSReadLineKeyHandler -Chord "Alt+Backspace" -ScriptBlock {{
-        param($key, $arg)
-        & $global:SmartHubExe delete-last | Out-Host
-        if ('SmartHub.SmartHubBridge' -as [type]) {{
-            [SmartHub.SmartHubBridge]::InvalidateCache()
-        }}
-        [Microsoft.PowerShell.PSConsoleReadLine]::InvokePrompt()
-    }}
-
-    # 6. 右方向鍵快速補全輔助
+    # 5. 右方向鍵快速補全幽靈文字
     Set-PSReadLineKeyHandler -Chord "RightArrow" -ScriptBlock {{
         param($key, $arg)
         $line = $null
