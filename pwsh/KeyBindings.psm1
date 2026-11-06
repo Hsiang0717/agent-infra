@@ -81,20 +81,6 @@ if ([System.Environment]::UserInteractive -and -not [Console]::IsOutputRedirecte
             param($key, $arg)
             & $smartHubExe delete-last
         }
-
-        # 自動非同步寫入指令歷史至 SQLite
-        $existingHandler = (Get-PSReadLineOption).AddToHistoryHandler
-        Set-PSReadLineOption -AddToHistoryHandler {
-            param($command)
-            if ($command -and -not [string]::IsNullOrWhiteSpace($command)) {
-                $cwd = (Get-Location).Path
-                Start-Process -FilePath $smartHubExe -ArgumentList @("record", "--command", $command, "--cwd", $cwd) -WindowStyle Hidden
-            }
-            if ($existingHandler) {
-                return & $existingHandler $command
-            }
-            return $true
-        }
     }
 
     # Tab 鍵：全面回歸最順暢的「行內逐項輪替」，絕不彈出干擾輸入的選單
