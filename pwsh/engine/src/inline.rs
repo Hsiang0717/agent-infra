@@ -360,21 +360,28 @@ impl InlineRunner {
                             }
                             KeyCode::Enter => {
                                 let trigger = buffer.trim().to_string();
-                                if !trigger.is_empty() {
-                                    let target_info = self
-                                        .current_items()
-                                        .get(self.selected_index)
-                                        .map(|it| (it.command.clone(), it.alias.clone()));
-                                    if let Some((cmd, old_alias)) = target_info {
+                                let target_info = self
+                                    .current_items()
+                                    .get(self.selected_index)
+                                    .map(|it| (it.command.clone(), it.alias.clone()));
+                                if let Some((cmd, old_alias)) = target_info {
+                                    if !trigger.is_empty() {
+                                        // 有輸入別名：儲存並覆蓋
                                         if let Some(ref old_tr) = old_alias {
                                             let _ = self.db.remove_alias(old_tr);
                                         }
                                         let _ = self.db.remove_aliases_for_expansion(&cmd);
                                         let _ = self.db.add_alias(&trigger, &cmd, None, None);
-                                        let _ = self.reload_data();
-                                        if let Some(pos) = self.current_items().iter().position(|it| it.command == cmd) {
-                                            self.selected_index = pos;
+                                    } else {
+                                        // 留空直接按 Enter：還原（清除別名，恢復原生無別名狀態）
+                                        if let Some(ref old_tr) = old_alias {
+                                            let _ = self.db.remove_alias(old_tr);
                                         }
+                                        let _ = self.db.remove_aliases_for_expansion(&cmd);
+                                    }
+                                    let _ = self.reload_data();
+                                    if let Some(pos) = self.current_items().iter().position(|it| it.command == cmd) {
+                                        self.selected_index = pos;
                                     }
                                 }
                                 self.state = InlineState::Normal;
@@ -648,7 +655,7 @@ impl InlineRunner {
                     Span::styled(" [命名別名] ", Style::default().fg(Color::Black).bg(Color::Magenta).add_modifier(Modifier::BOLD)),
                     Span::raw(" 請輸入別名 Trigger: "),
                     Span::styled(format!("{}_", buffer), Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
-                    Span::styled("  (按 Enter 儲存/覆蓋，按 Esc 放棄)", Style::default().fg(Color::DarkGray)),
+                    Span::styled("  (按 Enter 儲存/留空則還原，按 Esc 放棄)", Style::default().fg(Color::DarkGray)),
                 ]);
                 Paragraph::new(prompt).alignment(Alignment::Left)
             }
