@@ -1,5 +1,5 @@
 use std::fs;
-use std::io::{stdout, Write};
+use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use crossterm::{
@@ -261,15 +261,19 @@ impl InlineRunner {
 
         enable_raw_mode()?;
         let (orig_x, orig_y) = position().unwrap_or((0, 0));
+        let mut viewport_top_y: u16 = orig_y.saturating_add(1);
         // 直接開啟 Windows CONOUT$ 主控台螢幕緩衝區，徹底繞過 PowerShell ScriptBlock 對 stdout 的管線攔截
         let mut conout = fs::OpenOptions::new()
             .read(true)
             .write(true)
             .open("CONOUT$")?;
-        // 先換行至當前提示列正下方，避免覆蓋 PowerShell 提示字元與已輸入文字
-        let _ = conout.write_all(b"\r\n");
-        let _ = conout.flush();
-        execute!(conout, Hide)?;
+        // 進入前先將當前行以下徹底清除，消除任何既有殘留或 PSReadLine 繪製的字元
+        let _ = execute!(
+            conout,
+            MoveTo(0, viewport_top_y),
+            CtClear(ClearType::FromCursorDown),
+            Hide
+        );
 
         let backend = CrosstermBackend::new(conout);
         let mut terminal = Terminal::with_options(
@@ -280,7 +284,6 @@ impl InlineRunner {
         )?;
 
         let mut exit_action: Option<(String, String)> = None; // ("TAB" / "EXEC", cmd)
-        let mut viewport_top_y: u16 = orig_y.saturating_add(1);
 
         loop {
             terminal.draw(|f| {
