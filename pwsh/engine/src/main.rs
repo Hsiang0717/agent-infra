@@ -33,7 +33,7 @@ enum Commands {
         cwd: Option<String>,
 
         /// Pre-filled query string
-        #[arg(short, long)]
+        #[arg(short, long, allow_hyphen_values = true)]
         query: Option<String>,
 
         /// Output file path to store selected command and action
@@ -48,7 +48,7 @@ enum Commands {
         cwd: Option<String>,
 
         /// Current command-line input to filter suggestions
-        #[arg(short, long)]
+        #[arg(short, long, allow_hyphen_values = true)]
         query: Option<String>,
 
         /// Output file path to store selected command and action (TAB / EXEC)
@@ -63,7 +63,7 @@ enum Commands {
         cwd: Option<String>,
 
         /// Input query string typed by user
-        #[arg(short, long)]
+        #[arg(short, long, allow_hyphen_values = true)]
         query: String,
     },
 
@@ -73,7 +73,7 @@ enum Commands {
     /// Record a command execution into SQLite
     Record {
         /// The command line executed
-        #[arg(short, long)]
+        #[arg(short, long, allow_hyphen_values = true)]
         command: String,
 
         /// Working directory where the command was executed
@@ -700,17 +700,19 @@ fn main() {
 
     if ('SmartHub.SmartHubBridge' -as [type]) {{
         [SmartHub.SmartHubBridge]::RegisterAll($global:SmartHubExe, $ExecutionContext.SessionState.Path)
-        Set-PSReadLineOption -PredictionSource HistoryAndPlugin -ErrorAction SilentlyContinue
+        try {{ Set-PSReadLineOption -PredictionSource Plugin -ErrorAction Stop }} catch {{}}
     }} else {{
-        Set-PSReadLineOption -PredictionSource HistoryAndPlugin -ErrorAction SilentlyContinue
+        try {{ Set-PSReadLineOption -PredictionSource HistoryAndPlugin -ErrorAction Stop }} catch {{}}
     }}
 
     # 2. 原生內聯預測樣式 (InlineView 微淡幽靈文字，不遮擋視野)
-    Set-PSReadLineOption -PredictionViewStyle InlineView -ErrorAction SilentlyContinue
-    Set-PSReadLineOption -Colors @{{ InlinePrediction = "$([char]0x1b)[38;5;245m" }} -ErrorAction SilentlyContinue
-    Set-PSReadLineOption -MaximumHistoryCount 30000 -ErrorAction SilentlyContinue
-    Set-PSReadLineOption -HistoryNoDuplicates -ErrorAction SilentlyContinue
-    Set-PSReadLineOption -HistorySearchCursorMovesToEnd -ErrorAction SilentlyContinue
+    try {{
+        Set-PSReadLineOption -PredictionViewStyle InlineView -ErrorAction Stop
+        Set-PSReadLineOption -Colors @{{ InlinePrediction = "$([char]0x1b)[38;5;245m" }} -ErrorAction Stop
+        Set-PSReadLineOption -MaximumHistoryCount 30000 -ErrorAction Stop
+        Set-PSReadLineOption -HistoryNoDuplicates -ErrorAction Stop
+        Set-PSReadLineOption -HistorySearchCursorMovesToEnd -ErrorAction Stop
+    }} catch {{}}
 
     # 3. 原生命令列鍵位
     Set-PSReadLineKeyHandler -Chord "UpArrow" -Function HistorySearchBackward
@@ -723,21 +725,45 @@ fn main() {
         $line = $null
         $cursor = $null
         [Microsoft.PowerShell.PSConsoleReadLine]::GetBufferState([ref]$line, [ref]$cursor)
+        if ($null -eq $line) {{ $line = "" }}
 
         $actFile = Join-Path $env:TEMP ("smarthub_act_" + [System.Guid]::NewGuid().ToString("N") + ".tmp")
         $cwd = $ExecutionContext.SessionState.Path.CurrentFileSystemLocation.ProviderPath
 
         # 啟動內聯雙態選單 (選單期間禁止原生操作)
-        & $global:SmartHubExe inline --cwd $cwd --query "$line" --output-file $actFile
+        & $global:SmartHubExe inline "--cwd=$cwd" "--query=$line" "--output-file=$actFile"
+
+        if ('SmartHub.SmartHubBridge' -as [type]) {{
+            [SmartHub.SmartHubBridge]::InvalidateCache()
+        }}
 
         if (Test-Path -LiteralPath $actFile) {{
             $raw = Get-Content -LiteralPath $actFile -Raw -Encoding utf8
             Remove-Item -LiteralPath $actFile -Force -ErrorAction SilentlyContinue
             if ($raw) {{
-                $parts = $raw.Trim().Split("`t", 2)
-                if ($parts.Length -eq 2) {{
+                $parts = $raw.TrimEnd("`r", "`n").Split("`t", 3)
+                if ($parts.Length -ge 2) {{
                     $action = $parts[0]
-                    $cmd = $parts[1]
+                    $scrolled = 0
+                    [void][int]::TryParse($parts[1], [ref]$scrolled)
+                    $cmd = if ($parts.Length -ge 3) {{ $parts[2] }} else {{ "" }}
+
+                    # 若終端機因底部空間不足而向上捲動，同步補償 PSConsoleReadLine 內部 _initialY 座標
+                    if ($scrolled -gt 0) {{
+                        try {{
+                            $flags = [System.Reflection.BindingFlags]'NonPublic,Instance,Static'
+                            $singletonField = [Microsoft.PowerShell.PSConsoleReadLine].GetField('_singleton', $flags)
+                            $initYField = [Microsoft.PowerShell.PSConsoleReadLine].GetField('_initialY', $flags)
+                            if ($singletonField -and $initYField) {{
+                                $inst = $singletonField.GetValue($null)
+                                if ($inst) {{
+                                    $curY = [int]$initYField.GetValue($inst)
+                                    $initYField.SetValue($inst, [Math]::Max(0, $curY - $scrolled))
+                                }}
+                            }}
+                        }} catch {{}}
+                    }}
+
                     if ($action -eq "TAB") {{
                         # Tab 回填：回填到終端機命令列，恢復原生操作
                         [Microsoft.PowerShell.PSConsoleReadLine]::Replace(0, $line.Length, $cmd)

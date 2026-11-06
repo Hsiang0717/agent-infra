@@ -335,6 +335,11 @@ impl Database {
         Ok(rows > 0)
     }
 
+    pub fn remove_aliases_for_expansion(&self, expansion: &str) -> Result<bool> {
+        let rows = self.conn.execute("DELETE FROM aliases WHERE expansion = ?1", params![expansion])?;
+        Ok(rows > 0)
+    }
+
     pub fn get_recent_directories(&self, limit: usize) -> Result<Vec<(String, i64)>> {
         let mut stmt = self.conn.prepare(
             "SELECT path, visit_count FROM directory_visits

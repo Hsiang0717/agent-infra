@@ -3,7 +3,7 @@ use std::io::{stdout, Write};
 use std::path::{Path, PathBuf};
 
 use crossterm::{
-    cursor::{Hide, MoveUp, Show},
+    cursor::{position, Hide, MoveTo, Show},
     event::{self, Event, KeyCode, KeyEventKind},
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, Clear as CtClear, ClearType},
@@ -79,6 +79,7 @@ pub struct InlineRunner {
     active_group: Group,
     selected_index: usize,
     state: InlineState,
+    dismissed_commands: std::collections::HashSet<String>,
     smart_items: Vec<InlineItem>,
     local_items: Vec<InlineItem>,
     global_items: Vec<InlineItem>,
@@ -95,6 +96,7 @@ impl InlineRunner {
             active_group: Group::Smart,
             selected_index: 0,
             state: InlineState::Normal,
+            dismissed_commands: std::collections::HashSet::new(),
             smart_items: Vec::new(),
             local_items: Vec::new(),
             global_items: Vec::new(),
@@ -107,27 +109,34 @@ impl InlineRunner {
         let mut matcher = FuzzyEngine::new();
         let query = &self.query;
 
-        // 1. Smart Items: Project scripts + Virtual aliases
+        // 1. Smart Items: Virtual aliases + Project scripts (per-group deduplication)
         let mut smart = Vec::new();
         let aliases = self.db.get_all_aliases().unwrap_or_default();
-        let mut seen_commands = std::collections::HashSet::new();
+        let mut seen_smart = std::collections::HashSet::new();
 
         for a in &aliases {
-            smart.push(InlineItem {
-                command: a.expansion.clone(),
-                label: format!("[{}] ➔ {}", a.trigger, a.expansion),
-                source: "Virtual Alias".to_string(),
-                cwd: self.cwd.to_string_lossy().to_string(),
-                alias: Some(a.trigger.clone()),
-                id: Some(a.id),
-                is_alias: true,
-            });
-            seen_commands.insert(a.expansion.clone());
+            if self.dismissed_commands.contains(&a.expansion) {
+                continue;
+            }
+            if seen_smart.insert(a.expansion.clone()) {
+                smart.push(InlineItem {
+                    command: a.expansion.clone(),
+                    label: format!("[{}] ➔ {}", a.trigger, a.expansion),
+                    source: "Virtual Alias".to_string(),
+                    cwd: self.cwd.to_string_lossy().to_string(),
+                    alias: Some(a.trigger.clone()),
+                    id: Some(a.id),
+                    is_alias: true,
+                });
+            }
         }
 
         let ctx = Prober::probe(&self.cwd);
         for action in ctx.actions {
-            if seen_commands.insert(action.command.clone()) {
+            if self.dismissed_commands.contains(&action.command) {
+                continue;
+            }
+            if seen_smart.insert(action.command.clone()) {
                 smart.push(InlineItem {
                     command: action.command.clone(),
                     label: action.label,
@@ -140,13 +149,17 @@ impl InlineRunner {
             }
         }
 
-        // 2. Local Items
+        // 2. Local Items (independent per-group deduplication so Local always retains its history & alias badges)
         let git_root_str = ctx.git_root.as_ref().map(|p| p.to_string_lossy().to_string());
         let cwd_str = self.cwd.to_string_lossy().to_string();
         let local_records = self.db.get_local_history(&cwd_str, git_root_str.as_deref(), 200).unwrap_or_default();
         let mut local = Vec::new();
+        let mut seen_local = std::collections::HashSet::new();
         for r in local_records {
-            if seen_commands.insert(r.command.clone()) {
+            if self.dismissed_commands.contains(&r.command) {
+                continue;
+            }
+            if seen_local.insert(r.command.clone()) {
                 let alias = aliases.iter().find(|a| a.expansion == r.command).map(|a| a.trigger.clone());
                 local.push(InlineItem {
                     command: r.command.clone(),
@@ -160,11 +173,15 @@ impl InlineRunner {
             }
         }
 
-        // 3. Global Items
+        // 3. Global Items (independent per-group deduplication)
         let global_records = self.db.get_global_history(&cwd_str, 500).unwrap_or_default();
         let mut global = Vec::new();
+        let mut seen_global = std::collections::HashSet::new();
         for r in global_records {
-            if seen_commands.insert(r.command.clone()) {
+            if self.dismissed_commands.contains(&r.command) {
+                continue;
+            }
+            if seen_global.insert(r.command.clone()) {
                 let alias = aliases.iter().find(|a| a.expansion == r.command).map(|a| a.trigger.clone());
                 global.push(InlineItem {
                     command: r.command.clone(),
@@ -178,15 +195,24 @@ impl InlineRunner {
             }
         }
 
-        // Filter by query if non-empty
+        // Filter by query if non-empty, giving priority boost to exact/prefix alias trigger matches
         let filter_items = |items: Vec<InlineItem>, m: &mut FuzzyEngine| -> Vec<InlineItem> {
             if query.is_empty() {
                 return items;
             }
+            let q_lower = query.to_lowercase();
             let mut scored = Vec::new();
             for item in items {
                 let text = format!("{} {}", item.label, item.command);
-                if let Some(s) = m.score(&text, query) {
+                if let Some(mut s) = m.score(&text, query) {
+                    if let Some(ref al) = item.alias {
+                        let al_lower = al.to_lowercase();
+                        if al_lower == q_lower {
+                            s += 100_000;
+                        } else if al_lower.starts_with(&q_lower) {
+                            s += 25_000;
+                        }
+                    }
                     scored.push((s, item));
                 }
             }
@@ -234,7 +260,11 @@ impl InlineRunner {
         const INLINE_HEIGHT: u16 = 8;
 
         enable_raw_mode()?;
+        let (orig_x, orig_y) = position().unwrap_or((0, 0));
         let mut stdout_handle = stdout();
+        // 先換行至當前提示列正下方，避免覆蓋 PowerShell 提示字元與已輸入文字
+        let _ = stdout_handle.write_all(b"\r\n");
+        let _ = stdout_handle.flush();
         execute!(stdout_handle, Hide)?;
 
         let backend = CrosstermBackend::new(stdout_handle);
@@ -246,9 +276,13 @@ impl InlineRunner {
         )?;
 
         let mut exit_action: Option<(String, String)> = None; // ("TAB" / "EXEC", cmd)
+        let mut viewport_top_y: u16 = orig_y.saturating_add(1);
 
         loop {
-            terminal.draw(|f| self.render(f))?;
+            terminal.draw(|f| {
+                viewport_top_y = f.area().y;
+                self.render(f);
+            })?;
 
             if let Event::Key(key) = event::read()? {
                 if key.kind != KeyEventKind::Press {
@@ -323,10 +357,21 @@ impl InlineRunner {
                             KeyCode::Enter => {
                                 let trigger = buffer.trim().to_string();
                                 if !trigger.is_empty() {
-                                    if let Some(item) = self.current_items().get(self.selected_index) {
-                                        let _ = self.db.add_alias(&trigger, &item.command, None, None);
+                                    let target_info = self
+                                        .current_items()
+                                        .get(self.selected_index)
+                                        .map(|it| (it.command.clone(), it.alias.clone()));
+                                    if let Some((cmd, old_alias)) = target_info {
+                                        if let Some(ref old_tr) = old_alias {
+                                            let _ = self.db.remove_alias(old_tr);
+                                        }
+                                        let _ = self.db.remove_aliases_for_expansion(&cmd);
+                                        let _ = self.db.add_alias(&trigger, &cmd, None, None);
+                                        let _ = self.reload_data();
+                                        if let Some(pos) = self.current_items().iter().position(|it| it.command == cmd) {
+                                            self.selected_index = pos;
+                                        }
                                     }
-                                    let _ = self.reload_data();
                                 }
                                 self.state = InlineState::Normal;
                             }
@@ -340,18 +385,28 @@ impl InlineRunner {
             }
         }
 
-        // 清空內聯選單區域，還原終端機畫面
+        // 清空內聯選單區域（僅清除 viewport_top_y 以下），並將游標精準歸位回原提示列
+        let new_prompt_y = viewport_top_y.saturating_sub(1);
+        let scrolled = orig_y.saturating_sub(new_prompt_y);
         disable_raw_mode()?;
         let mut out = stdout();
-        let _ = execute!(out, MoveUp(INLINE_HEIGHT), CtClear(ClearType::FromCursorDown), Show);
+        let _ = execute!(
+            out,
+            MoveTo(0, viewport_top_y),
+            CtClear(ClearType::FromCursorDown),
+            MoveTo(orig_x, new_prompt_y),
+            Show
+        );
         let _ = out.flush();
 
-        // 輸出回傳動作給 PowerShell
-        if let Some((action, cmd)) = exit_action {
-            if let Some(ref path) = self.output_file {
-                let content = format!("{}\t{}", action, cmd);
-                let _ = fs::write(path, content);
-            }
+        // 輸出回傳動作與捲動行數給 PowerShell（透過暫存檔傳遞，避免污染終端機 stdout）
+        if let Some(ref path) = self.output_file {
+            let content = match exit_action {
+                Some((ref action, ref cmd)) => format!("{}\t{}\t{}", action, scrolled, cmd),
+                None => format!("ESC\t{}\t", scrolled),
+            };
+            let _ = fs::write(path, content);
+        } else if let Some((action, cmd)) = exit_action {
             println!("{}\t{}", action, cmd);
         }
 
@@ -367,15 +422,15 @@ impl InlineRunner {
             }
         };
 
-        if is_alias {
-            if let Some(ref trigger) = alias_trigger {
-                let _ = self.db.remove_alias(trigger);
-            }
-        } else {
+        if let Some(ref trigger) = alias_trigger {
+            let _ = self.db.remove_alias(trigger);
+        }
+        if !is_alias {
             if let Some(history_id) = id {
                 let _ = self.db.delete_history(history_id);
             }
             let _ = self.db.delete_command(&cmd);
+            self.dismissed_commands.insert(cmd);
         }
 
         let _ = self.reload_data();
@@ -434,8 +489,8 @@ impl InlineRunner {
         let items = self.current_items();
         let total_items = items.len();
 
-        // 左欄：候選指令清單
-        let list_height = main_chunks[0].height as usize;
+        // 左欄：候選指令清單（扣除上下邊框 2 行高度，避免第 5/6 項被裁切不可見）
+        let list_height = main_chunks[0].height.saturating_sub(2).max(1) as usize;
         let start_idx = if self.selected_index >= list_height {
             self.selected_index - list_height + 1
         } else {
@@ -458,11 +513,14 @@ impl InlineRunner {
                     ("   ", Style::default().fg(Color::White))
                 };
 
+                let clean_cmd = item.command.replace("\r\n", " ↵ ").replace('\n', " ↵ ");
+                let clean_label = item.label.replace("\r\n", " ↵ ").replace('\n', " ↵ ");
+
                 // 若有別名，高亮顯示別名
                 let display_text = if let Some(ref al) = item.alias {
-                    format!("{}. [{}] {}", num, al, item.command)
+                    format!("{}. [{}] {}", num, al, clean_cmd)
                 } else {
-                    format!("{}. {}", num, item.label)
+                    format!("{}. {}", num, clean_label)
                 };
 
                 list_lines.push(Line::from(vec![
@@ -481,9 +539,10 @@ impl InlineRunner {
         // 右欄：詳細資訊預覽卡片
         let mut detail_lines = Vec::new();
         if let Some(item) = items.get(self.selected_index) {
+            let clean_cmd = item.command.replace("\r\n", " ↵ ").replace('\n', " ↵ ");
             detail_lines.push(Line::from(vec![
                 Span::styled("指令: ", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
-                Span::styled(&item.command, Style::default().fg(Color::White)),
+                Span::styled(clean_cmd, Style::default().fg(Color::White)),
             ]));
             detail_lines.push(Line::from(vec![
                 Span::styled("分組: ", Style::default().fg(Color::Cyan)),
