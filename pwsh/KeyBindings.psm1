@@ -35,28 +35,44 @@ if ([System.Environment]::UserInteractive -and -not [Console]::IsOutputRedirecte
     }
 
     if ($smartHubExe) {
-        # Ctrl+R: 喚起 Smart-Hub 三層互動清單 (Smart/Alias, Local, Global)
-        Set-PSReadLineKeyHandler -Chord "Ctrl+r" -ScriptBlock {
-            param($key, $arg)
+        function script:Invoke-SmartHubSearch {
             $line = $null
             $cursor = $null
             [Microsoft.PowerShell.PSConsoleReadLine]::GetBufferState([ref]$line, [ref]$cursor)
 
             $cwd = (Get-Location).Path
-            $psi = New-Object System.Diagnostics.ProcessStartInfo
-            $psi.FileName = $smartHubExe
-            $psi.Arguments = "search --cwd `"$cwd`" --query `"$line`""
-            $psi.UseShellExecute = $false
-            $psi.RedirectStandardOutput = $true
-            $psi.StandardOutputEncoding = [System.Text.Encoding]::UTF8
+            $tmpFile = [System.IO.Path]::GetTempFileName()
+            try {
+                & $smartHubExe search --cwd "$cwd" --query "$line" --output-file "$tmpFile"
+                if (Test-Path $tmpFile) {
+                    $selected = Get-Content -Raw -Path $tmpFile -Encoding utf8
+                    if ($selected) {
+                        $cleaned = $selected.TrimEnd("`r`n")
+                        [Microsoft.PowerShell.PSConsoleReadLine]::RevertLine()
+                        [Microsoft.PowerShell.PSConsoleReadLine]::Insert($cleaned)
+                    }
+                }
+            } finally {
+                Remove-Item $tmpFile -ErrorAction SilentlyContinue
+            }
+        }
 
-            $p = [System.Diagnostics.Process]::Start($psi)
-            $output = $p.StandardOutput.ReadToEnd()
-            $p.WaitForExit()
+        # Ctrl+R: 喚起 Smart-Hub 三層互動清單 (Smart/Alias, Local, Global)
+        Set-PSReadLineKeyHandler -Chord "Ctrl+r" -ScriptBlock {
+            param($key, $arg)
+            script:Invoke-SmartHubSearch
+        }
 
-            if ($p.ExitCode -eq 0 -and $output) {
-                [Microsoft.PowerShell.PSConsoleReadLine]::RevertLine()
-                [Microsoft.PowerShell.PSConsoleReadLine]::Insert($output)
+        # UpArrow: 若空行直接喚起 Smart-Hub 三層清單；若有前綴則維持快速向上過濾
+        Set-PSReadLineKeyHandler -Chord "UpArrow" -ScriptBlock {
+            param($key, $arg)
+            $line = $null
+            $cursor = $null
+            [Microsoft.PowerShell.PSConsoleReadLine]::GetBufferState([ref]$line, [ref]$cursor)
+            if ([string]::IsNullOrWhiteSpace($line)) {
+                script:Invoke-SmartHubSearch
+            } else {
+                [Microsoft.PowerShell.PSConsoleReadLine]::HistorySearchBackward()
             }
         }
 

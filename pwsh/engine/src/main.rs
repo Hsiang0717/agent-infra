@@ -23,7 +23,7 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Launch interactive TUI search and return chosen command to stdout
+    /// Launch interactive TUI search and return chosen command to stdout or file
     Search {
         /// Working directory to contextualize search
         #[arg(short, long)]
@@ -32,6 +32,10 @@ enum Commands {
         /// Initial search query
         #[arg(short, long)]
         query: Option<String>,
+
+        /// Write selected command to a file
+        #[arg(short, long)]
+        output_file: Option<String>,
     },
 
     /// Record a command execution into SQLite
@@ -113,7 +117,7 @@ fn main() {
     };
 
     match cli.command {
-        Commands::Search { cwd, query } => {
+        Commands::Search { cwd, query, output_file } => {
             let current_dir = cwd.unwrap_or_else(|| {
                 env::current_dir()
                     .unwrap_or_else(|_| PathBuf::from("."))
@@ -123,8 +127,11 @@ fn main() {
 
             match tui::run_tui(&db, &current_dir, query.as_deref()) {
                 Ok(Some(selected_cmd)) => {
-                    // Output the selected command to stdout for PowerShell to capture
-                    print!("{}", selected_cmd);
+                    if let Some(out_path) = output_file {
+                        let _ = std::fs::write(out_path, &selected_cmd);
+                    } else {
+                        print!("{}", selected_cmd);
+                    }
                     std::process::exit(0);
                 }
                 Ok(None) => {
