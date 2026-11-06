@@ -49,22 +49,11 @@ if (-not (Test-Path -LiteralPath $Destination)) {
 }
 
 $targetExe = Join-Path $Destination 'smart-hub.exe'
-$targetDll = Join-Path $Destination 'SmartHub.Predictor.dll'
-$releaseDll = Join-Path $releaseDir 'SmartHub.Predictor.dll'
 
-if ($PSCmdlet.ShouldProcess($targetExe, 'Deploy smart-hub.exe and precompile SmartHub.Predictor.dll')) {
+if ($PSCmdlet.ShouldProcess($targetExe, 'Deploy smart-hub.exe')) {
     Get-Process -Name 'smart-hub' -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
     Copy-Item -LiteralPath $releaseExe -Destination $targetExe -Force
     Write-Host "==> [Installed] Deployed smart-hub.exe to: $targetExe" -ForegroundColor Green
-
-    # 3. 預編譯 SmartHub.Predictor.dll (消除每次終端啟動的 Roslyn 編譯延遲)
-    $csSource = & $targetExe csharp-source | Out-String
-    if (Test-Path -LiteralPath $targetDll) {
-        Remove-Item -LiteralPath $targetDll -Force -ErrorAction SilentlyContinue
-    }
-    Add-Type -TypeDefinition $csSource -OutputAssembly $targetDll
-    Copy-Item -LiteralPath $targetDll -Destination $releaseDll -Force
-    Write-Host "==> [Compiled] Pre-compiled ICommandPredictor adapter: $targetDll" -ForegroundColor Green
 }
 
 # 4. 清理舊版 KeyBindings PowerShell 模組與腳本殘留

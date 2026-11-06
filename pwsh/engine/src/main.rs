@@ -6,6 +6,7 @@ mod db;
 mod matcher;
 mod predictor;
 mod prober;
+mod tui;
 
 use db::Database;
 use predictor::PredictorEngine;
@@ -24,6 +25,21 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
+    /// Interactive Master-Detail TUI Search (Ctrl+R)
+    Search {
+        /// Working directory to contextualize search
+        #[arg(short, long)]
+        cwd: Option<String>,
+
+        /// Pre-filled query string
+        #[arg(short, long)]
+        query: Option<String>,
+
+        /// Output file path to store selected command and action
+        #[arg(short, long)]
+        output_file: Option<String>,
+    },
+
     /// Run one-shot 3-tier prediction ([★ Smart], [● Local], [○ Global])
     Predict {
         /// Working directory to contextualize predictions
@@ -508,6 +524,18 @@ fn main() {
     };
 
     match cli.command {
+        Commands::Search { cwd, query, output_file } => {
+            let current_dir = match cwd {
+                Some(c) => PathBuf::from(c),
+                None => env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
+            };
+            let q = query.unwrap_or_default();
+            let out = output_file.as_ref().map(std::path::Path::new);
+            if let Err(e) = tui::run(&current_dir, &q, out) {
+                eprintln!("Smart-Hub TUI error: {e}");
+            }
+        }
+
         Commands::Predict { cwd, query } => {
             let current_dir = cwd.unwrap_or_else(|| {
                 env::current_dir()
@@ -646,34 +674,13 @@ fn main() {
                 .unwrap_or_else(|_| PathBuf::from("smart-hub.exe"))
                 .to_string_lossy()
                 .to_string();
-            let dll_path = env::current_exe()
-                .ok()
-                .and_then(|p| p.parent().map(|dir| dir.join("SmartHub.Predictor.dll")))
-                .unwrap_or_else(|| PathBuf::from("SmartHub.Predictor.dll"))
-                .to_string_lossy()
-                .to_string();
 
             print!(
                 r#"if ([System.Environment]::UserInteractive -and -not [Console]::IsOutputRedirected) {{
     $global:SmartHubExe = '{exe_path}'
-    $smartHubDll = '{dll_path}'
 
-    if (-not ('SmartHub.SmartHubBridge' -as [type])) {{
-        if (Test-Path -LiteralPath $smartHubDll) {{
-            [System.Reflection.Assembly]::Load([System.IO.File]::ReadAllBytes($smartHubDll)) | Out-Null
-        }} else {{
-            $cs = & $global:SmartHubExe csharp-source | Out-String
-            Add-Type -TypeDefinition $cs -ErrorAction SilentlyContinue
-        }}
-    }}
-
-    if ('SmartHub.SmartHubBridge' -as [type]) {{
-        [SmartHub.SmartHubBridge]::RegisterAll($global:SmartHubExe, $ExecutionContext.SessionState.Path)
-        Set-PSReadLineOption -PredictionSource Plugin
-    }} else {{
-        Set-PSReadLineOption -PredictionSource HistoryAndPlugin
-    }}
-
+    # 1. PSReadLine 基礎體驗最佳化 (原生歷史預測，極致流暢，零凍結)
+    Set-PSReadLineOption -PredictionSource History
     Set-PSReadLineOption -PredictionViewStyle ListView
     Set-PSReadLineOption -Colors @{{ InlinePrediction = "$([char]0x1b)[38;5;245m" }}
     Set-PSReadLineOption -MaximumHistoryCount 30000
@@ -685,17 +692,63 @@ fn main() {
     Set-PSReadLineKeyHandler -Chord "Tab" -Function TabCompleteNext
     Set-PSReadLineKeyHandler -Chord "Shift+Tab" -Function TabCompletePrevious
 
-    # Alt+Backspace: 即刻從 SQLite 歷史中刪除上一筆打錯的指令並刷新預測快取
+    # 2. Ctrl+R: 喚起 Smart-Hub 雙欄 Master-Detail TUI (提案二)
+    function global:Invoke-SmartHubSearch {{
+        $line = $null
+        $cursor = $null
+        [Microsoft.PowerShell.PSConsoleReadLine]::GetBufferState([ref]$line, [ref]$cursor)
+
+        $cwd = (Get-Location).Path
+        $tmpFile = [System.IO.Path]::GetTempFileName()
+        try {{
+            & $global:SmartHubExe search --cwd "$cwd" --query "$line" --output-file "$tmpFile"
+            if (Test-Path -LiteralPath $tmpFile) {{
+                $raw = Get-Content -Raw -Path $tmpFile -Encoding utf8 -ErrorAction SilentlyContinue
+                if ($raw) {{
+                    $res = $raw | ConvertFrom-Json -ErrorAction SilentlyContinue
+                    if ($res -and $res.command) {{
+                        [Microsoft.PowerShell.PSConsoleReadLine]::RevertLine()
+                        [Microsoft.PowerShell.PSConsoleReadLine]::Insert($res.command)
+                        if ($res.action -eq 'execute') {{
+                            [Microsoft.PowerShell.PSConsoleReadLine]::AcceptLine()
+                        }}
+                    }}
+                }}
+            }}
+        }} finally {{
+            Remove-Item -LiteralPath $tmpFile -Force -ErrorAction SilentlyContinue
+        }}
+    }}
+
+    Set-PSReadLineKeyHandler -Chord "Ctrl+r" -ScriptBlock {{
+        param($key, $arg)
+        global:Invoke-SmartHubSearch
+    }}
+
+    # 3. Alt+Backspace: 即刻從 SQLite 歷史中刪除上一筆打錯的指令
     Set-PSReadLineKeyHandler -Chord "Alt+Backspace" -ScriptBlock {{
         param($key, $arg)
-        & $global:SmartHubExe delete-last | Out-Host
-        if ('SmartHub.SmartHubBridge' -as [type]) {{
-            [SmartHub.SmartHubBridge]::InvalidateCache()
-        }}
+        & $global:SmartHubExe delete-last
         [Microsoft.PowerShell.PSConsoleReadLine]::InvokePrompt()
     }}
 
-    # 右方向鍵：行內移動一格，行尾補全下一個單字
+    # 4. 非阻塞非同步寫入 SQLite 歷史 (新指令自動歸檔)
+    Set-PSReadLineOption -AddToHistoryHandler {{
+        param($cmd)
+        if ($cmd -and -not [string]::IsNullOrWhiteSpace($cmd)) {{
+            try {{
+                $psi = [System.Diagnostics.ProcessStartInfo]::new($global:SmartHubExe)
+                $safeCmd = $cmd.Replace('"', '\"')
+                $psi.Arguments = "record --command `"$safeCmd`" --cwd `"$((Get-Location).Path)`""
+                $psi.CreateNoWindow = $true
+                $psi.UseShellExecute = $false
+                [System.Diagnostics.Process]::Start($psi) | Out-Null
+            }} catch {{ }}
+        }}
+        return $true
+    }}
+
+    # 5. 右方向鍵快速補全輔助
     Set-PSReadLineKeyHandler -Chord "RightArrow" -ScriptBlock {{
         param($key, $arg)
         $line = $null
@@ -708,7 +761,6 @@ fn main() {
         }}
     }}
 
-    # Ctrl + 右方向鍵：行內跳至下一個單字，行尾接受整行預測
     Set-PSReadLineKeyHandler -Chord "Ctrl+RightArrow" -ScriptBlock {{
         param($key, $arg)
         $line = $null
