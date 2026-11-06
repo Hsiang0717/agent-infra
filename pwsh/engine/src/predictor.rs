@@ -431,9 +431,6 @@ pub fn run_serve(db: &Database) {
                         let cwd = unescape_tsv_field(parts[1]);
                         let query = unescape_tsv_field(parts[2]);
                         let items = engine.predict(db, &cwd, &query);
-                        if let Ok(runner) = crate::inline::InlineRunner::new(Path::new(&cwd), &query, None) {
-                            runner.render_passive_preview();
-                        }
                         let _ = writeln!(writer, "OK\t{}", items.len());
                         for it in items {
                             let _ = writeln!(
@@ -447,7 +444,6 @@ pub fn run_serve(db: &Database) {
                         let _ = writer.flush();
                     }
                     "RECORD" if parts.len() >= 4 => {
-                        crate::inline::InlineRunner::clear_passive_preview();
                         let cwd = unescape_tsv_field(parts[1]);
                         let exit_code: Option<i32> = parts[2].parse().ok();
                         let cmd = unescape_tsv_field(parts[3]);

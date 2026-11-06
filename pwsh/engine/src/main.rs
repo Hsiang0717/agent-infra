@@ -705,9 +705,9 @@ fn main() {
         try {{ Set-PSReadLineOption -PredictionSource HistoryAndPlugin -ErrorAction Stop }} catch {{}}
     }}
 
-    # 2. 原生內聯預測樣式 (InlineView 微淡幽靈文字，不遮擋視野)
+    # 2. 原生內聯預測樣式 (隨打隨展開下方候選清單 ListView)
     try {{
-        Set-PSReadLineOption -PredictionViewStyle InlineView -ErrorAction Stop
+        Set-PSReadLineOption -PredictionViewStyle ListView -ErrorAction Stop
         Set-PSReadLineOption -Colors @{{ InlinePrediction = "$([char]0x1b)[38;5;245m" }} -ErrorAction Stop
         Set-PSReadLineOption -MaximumHistoryCount 30000 -ErrorAction Stop
         Set-PSReadLineOption -HistoryNoDuplicates -ErrorAction Stop

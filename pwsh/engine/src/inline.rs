@@ -425,53 +425,6 @@ impl InlineRunner {
         Ok(())
     }
 
-    pub fn render_passive_preview(&self) {
-        let Ok((orig_x, orig_y)) = position() else { return };
-        let Ok((term_w, term_h)) = crossterm::terminal::size() else { return };
-        if term_w < 30 || orig_y + 2 >= term_h {
-            return;
-        }
-        let avail_h = (term_h - orig_y - 1).min(8);
-        if avail_h < 4 {
-            return;
-        }
-        let Ok(mut conout) = fs::OpenOptions::new().read(true).write(true).open("CONOUT$") else {
-            return;
-        };
-        let area = ratatui::layout::Rect::new(0, orig_y + 1, term_w, avail_h);
-        let backend = CrosstermBackend::new(conout);
-        if let Ok(mut term) = Terminal::with_options(
-            backend,
-            TerminalOptions {
-                viewport: Viewport::Fixed(area),
-            },
-        ) {
-            let _ = term.draw(|f| self.render(f));
-        }
-        if let Ok(mut out) = fs::OpenOptions::new().read(true).write(true).open("CONOUT$") {
-            let _ = execute!(out, MoveTo(orig_x, orig_y), Show);
-            let _ = out.flush();
-        }
-    }
-
-    pub fn clear_passive_preview() {
-        let Ok((orig_x, orig_y)) = position() else { return };
-        let Ok((_, term_h)) = crossterm::terminal::size() else { return };
-        if orig_y + 1 >= term_h {
-            return;
-        }
-        if let Ok(mut out) = fs::OpenOptions::new().read(true).write(true).open("CONOUT$") {
-            let _ = execute!(
-                out,
-                MoveTo(0, orig_y + 1),
-                CtClear(ClearType::FromCursorDown),
-                MoveTo(orig_x, orig_y),
-                Show
-            );
-            let _ = out.flush();
-        }
-    }
-
     fn delete_current_item(&mut self) {
         let (is_alias, alias_trigger, cmd, id) = {
             if let Some(item) = self.current_items().get(self.selected_index) {
