@@ -261,13 +261,17 @@ impl InlineRunner {
 
         enable_raw_mode()?;
         let (orig_x, orig_y) = position().unwrap_or((0, 0));
-        let mut stdout_handle = stdout();
+        // 直接開啟 Windows CONOUT$ 主控台螢幕緩衝區，徹底繞過 PowerShell ScriptBlock 對 stdout 的管線攔截
+        let mut conout = fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open("CONOUT$")?;
         // 先換行至當前提示列正下方，避免覆蓋 PowerShell 提示字元與已輸入文字
-        let _ = stdout_handle.write_all(b"\r\n");
-        let _ = stdout_handle.flush();
-        execute!(stdout_handle, Hide)?;
+        let _ = conout.write_all(b"\r\n");
+        let _ = conout.flush();
+        execute!(conout, Hide)?;
 
-        let backend = CrosstermBackend::new(stdout_handle);
+        let backend = CrosstermBackend::new(conout);
         let mut terminal = Terminal::with_options(
             backend,
             TerminalOptions {
@@ -389,15 +393,16 @@ impl InlineRunner {
         let new_prompt_y = viewport_top_y.saturating_sub(1);
         let scrolled = orig_y.saturating_sub(new_prompt_y);
         disable_raw_mode()?;
-        let mut out = stdout();
-        let _ = execute!(
-            out,
-            MoveTo(0, viewport_top_y),
-            CtClear(ClearType::FromCursorDown),
-            MoveTo(orig_x, new_prompt_y),
-            Show
-        );
-        let _ = out.flush();
+        if let Ok(mut out) = fs::OpenOptions::new().read(true).write(true).open("CONOUT$") {
+            let _ = execute!(
+                out,
+                MoveTo(0, viewport_top_y),
+                CtClear(ClearType::FromCursorDown),
+                MoveTo(orig_x, new_prompt_y),
+                Show
+            );
+            let _ = out.flush();
+        }
 
         // 輸出回傳動作與捲動行數給 PowerShell（透過暫存檔傳遞，避免污染終端機 stdout）
         if let Some(ref path) = self.output_file {
@@ -411,6 +416,53 @@ impl InlineRunner {
         }
 
         Ok(())
+    }
+
+    pub fn render_passive_preview(&self) {
+        let Ok((orig_x, orig_y)) = position() else { return };
+        let Ok((term_w, term_h)) = crossterm::terminal::size() else { return };
+        if term_w < 30 || orig_y + 2 >= term_h {
+            return;
+        }
+        let avail_h = (term_h - orig_y - 1).min(8);
+        if avail_h < 4 {
+            return;
+        }
+        let Ok(mut conout) = fs::OpenOptions::new().read(true).write(true).open("CONOUT$") else {
+            return;
+        };
+        let area = ratatui::layout::Rect::new(0, orig_y + 1, term_w, avail_h);
+        let backend = CrosstermBackend::new(conout);
+        if let Ok(mut term) = Terminal::with_options(
+            backend,
+            TerminalOptions {
+                viewport: Viewport::Fixed(area),
+            },
+        ) {
+            let _ = term.draw(|f| self.render(f));
+        }
+        if let Ok(mut out) = fs::OpenOptions::new().read(true).write(true).open("CONOUT$") {
+            let _ = execute!(out, MoveTo(orig_x, orig_y), Show);
+            let _ = out.flush();
+        }
+    }
+
+    pub fn clear_passive_preview() {
+        let Ok((orig_x, orig_y)) = position() else { return };
+        let Ok((_, term_h)) = crossterm::terminal::size() else { return };
+        if orig_y + 1 >= term_h {
+            return;
+        }
+        if let Ok(mut out) = fs::OpenOptions::new().read(true).write(true).open("CONOUT$") {
+            let _ = execute!(
+                out,
+                MoveTo(0, orig_y + 1),
+                CtClear(ClearType::FromCursorDown),
+                MoveTo(orig_x, orig_y),
+                Show
+            );
+            let _ = out.flush();
+        }
     }
 
     fn delete_current_item(&mut self) {
