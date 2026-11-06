@@ -1,4 +1,4 @@
-use std::io::{self, stdout, Stdout};
+use std::io::{self, stderr, Stderr};
 use std::path::Path;
 use std::time::Duration;
 
@@ -302,23 +302,23 @@ impl App {
 
 pub fn run_tui(db: &Database, cwd: &str, initial_query: Option<&str>) -> io::Result<Option<String>> {
     enable_raw_mode()?;
-    let mut stdout = stdout();
-    execute!(stdout, EnterAlternateScreen)?;
-    let backend = CrosstermBackend::new(stdout);
+    let mut err_out = stderr();
+    execute!(err_out, EnterAlternateScreen)?;
+    let backend = CrosstermBackend::new(err_out);
     let mut terminal = Terminal::new(backend)?;
 
     let mut app = App::new(db, cwd, initial_query);
     let result = run_loop(&mut terminal, &mut app, db);
 
-    disable_raw_mode()?;
-    execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
-    terminal.show_cursor()?;
+    let _ = disable_raw_mode();
+    let _ = execute!(terminal.backend_mut(), LeaveAlternateScreen);
+    let _ = terminal.show_cursor();
 
     result
 }
 
 fn run_loop(
-    terminal: &mut Terminal<CrosstermBackend<Stdout>>,
+    terminal: &mut Terminal<CrosstermBackend<Stderr>>,
     app: &mut App,
     db: &Database,
 ) -> io::Result<Option<String>> {

@@ -35,7 +35,8 @@ if ([System.Environment]::UserInteractive -and -not [Console]::IsOutputRedirecte
     }
 
     if ($smartHubExe) {
-        function script:Invoke-SmartHubSearch {
+        $global:SmartHubExe = $smartHubExe
+        function global:Invoke-SmartHubSearch {
             $line = $null
             $cursor = $null
             [Microsoft.PowerShell.PSConsoleReadLine]::GetBufferState([ref]$line, [ref]$cursor)
@@ -43,7 +44,7 @@ if ([System.Environment]::UserInteractive -and -not [Console]::IsOutputRedirecte
             $cwd = (Get-Location).Path
             $tmpFile = [System.IO.Path]::GetTempFileName()
             try {
-                & $smartHubExe search --cwd "$cwd" --query "$line" --output-file "$tmpFile"
+                & $global:SmartHubExe search --cwd "$cwd" --query "$line" --output-file "$tmpFile" | Out-Host
                 if (Test-Path $tmpFile) {
                     $selected = Get-Content -Raw -Path $tmpFile -Encoding utf8
                     if ($selected) {
@@ -60,26 +61,13 @@ if ([System.Environment]::UserInteractive -and -not [Console]::IsOutputRedirecte
         # Ctrl+R: 喚起 Smart-Hub 三層互動清單 (Smart/Alias, Local, Global)
         Set-PSReadLineKeyHandler -Chord "Ctrl+r" -ScriptBlock {
             param($key, $arg)
-            script:Invoke-SmartHubSearch
-        }
-
-        # UpArrow: 若空行直接喚起 Smart-Hub 三層清單；若有前綴則維持快速向上過濾
-        Set-PSReadLineKeyHandler -Chord "UpArrow" -ScriptBlock {
-            param($key, $arg)
-            $line = $null
-            $cursor = $null
-            [Microsoft.PowerShell.PSConsoleReadLine]::GetBufferState([ref]$line, [ref]$cursor)
-            if ([string]::IsNullOrWhiteSpace($line)) {
-                script:Invoke-SmartHubSearch
-            } else {
-                [Microsoft.PowerShell.PSConsoleReadLine]::HistorySearchBackward()
-            }
+            global:Invoke-SmartHubSearch
         }
 
         # Alt+Backspace: 即刻從 SQLite 歷史中刪除上一筆打錯的指令
         Set-PSReadLineKeyHandler -Chord "Alt+Backspace" -ScriptBlock {
             param($key, $arg)
-            & $smartHubExe delete-last
+            & $global:SmartHubExe delete-last | Out-Host
         }
     }
 
