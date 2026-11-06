@@ -1,6 +1,7 @@
 use nucleo_matcher::{Config, Matcher, Utf32Str};
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct ScoredCandidate<T> {
     pub item: T,
     pub score: u32,
@@ -31,6 +32,7 @@ impl FuzzyEngine {
         self.matcher.fuzzy_match(text_u32, query_u32).map(|s| s as u32)
     }
 
+    #[allow(dead_code)]
     pub fn filter_and_rank<T: Clone>(
         &mut self,
         items: Vec<T>,

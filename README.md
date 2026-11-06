@@ -28,9 +28,9 @@ license: MIT
 * **[profile/](profile/)**: Agent-Native CLI 工具鏈與 PowerShell Profile 擴充。
   * [README.md](profile/README.md): 外部相依清單（winget）、原生 CLI 分工矩陣與 Helper 說明。
   * 提供 `AgentHelpers.ps1` 與模組化包裝（`.psd1` / `.psm1`），支援宣告式 Dot-source 引用與標準 PowerShell 模組 Auto-loading 雙安裝架構。
-* **[pwsh/](pwsh/)**: PowerShell 互動終端鍵盤操作與 PSReadLine 調校。
-  * [README.md](pwsh/README.md): 上下文感知右方向鍵（單字/整行補全）、智慧歷史前綴搜尋、行內快速補全說明。
-  * 提供 `KeyBindings.ps1` 與模組封裝（`.psd1` / `.psm1`），支援本機 Dot-source 與跨環境模組部署。
+* **[pwsh/](pwsh/)**: PowerShell 原生三層智慧預測引擎 (`smart-hub` Rust + SQLite + `ICommandPredictor`) 與 PSReadLine 調校。
+  * [README.md](pwsh/README.md): 原生浮動 `ListView` 三層即時預測 (`[★ Smart]` / `[● Local]` / `[○ Global]`)、上下文感知右方向鍵（單字/整行補全）、`Alt+Backspace` 即時刪錯說明。
+  * [install.ps1](pwsh/install.ps1): 一鍵編譯部署 `smart-hub.exe` 與 `SmartHub.Predictor.dll` 至 `~/.antigravity/` 並配置 `$PROFILE`。
 * **[status/](status/)**: 狀態列遙測儀表板。
   * [statusline-rs](status/statusline-rs/): Rust 原生高效能低延遲狀態列（冷啟動 < 20ms），具備固定 3 行自適應防跳動儀表板（Zero-Jitter Dashboard）、按需延遲載入（Lazy Loading）與 Morandi 莫蘭迪低飽和配色。
   * [install.ps1](status/install.ps1): 一鍵編譯與部署 `statusline.exe` 至 `~/.antigravity/`。

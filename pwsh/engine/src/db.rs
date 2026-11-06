@@ -11,6 +11,7 @@ pub struct HistoryRecord {
     pub exit_code: Option<i32>,
     pub duration_ms: Option<i64>,
     pub created_at: String,
+    pub freq: i64,
 }
 
 #[derive(Debug, Clone)]
@@ -75,10 +76,93 @@ impl Database {
                 path TEXT PRIMARY KEY,
                 visit_count INTEGER DEFAULT 1,
                 last_visited DATETIME DEFAULT CURRENT_TIMESTAMP
+            );
+
+            CREATE TABLE IF NOT EXISTS meta (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL
             );"
         )?;
 
-        Ok(Self { conn })
+        let db = Self { conn };
+        let _ = db.seed_psreadline_history_if_needed();
+        Ok(db)
+    }
+
+    pub fn seed_psreadline_history_if_needed(&self) -> Result<usize> {
+        let already_seeded: Option<String> = self
+            .conn
+            .query_row(
+                "SELECT value FROM meta WHERE key = 'psreadline_seeded'",
+                [],
+                |r| r.get(0),
+            )
+            .ok();
+        if already_seeded.as_deref() == Some("1") {
+            return Ok(0);
+        }
+
+        let hist_path = dirs::data_dir().map(|d| {
+            d.join("Microsoft")
+                .join("Windows")
+                .join("PowerShell")
+                .join("PSReadLine")
+                .join("ConsoleHost_history.txt")
+        });
+
+        let mut imported = 0usize;
+        if let Some(path) = hist_path {
+            if path.exists() {
+                if let Ok(content) = std::fs::read_to_string(&path) {
+                    // Keep unique commands in order of their latest appearance
+                    let mut seen = std::collections::HashSet::new();
+                    let mut ordered_rev = Vec::new();
+                    for line in content.lines().rev() {
+                        let trimmed = line.trim();
+                        if trimmed.len() < 2 || trimmed.ends_with('`') {
+                            continue;
+                        }
+                        if seen.insert(trimmed.to_string()) {
+                            ordered_rev.push(trimmed.to_string());
+                            if ordered_rev.len() >= 5000 {
+                                break;
+                            }
+                        }
+                    }
+                    ordered_rev.reverse();
+
+                    self.conn.execute_batch("BEGIN IMMEDIATE;")?;
+                    {
+                        let mut stmt = self.conn.prepare(
+                            "INSERT INTO history (command, cwd, git_root, exit_code, duration_ms)
+                             VALUES (?1, '', NULL, 0, NULL)",
+                        )?;
+                        for cmd in ordered_rev {
+                            let _ = stmt.execute(params![cmd]);
+                            imported += 1;
+                        }
+                    }
+                    self.conn.execute(
+                        "INSERT OR REPLACE INTO meta (key, value) VALUES ('psreadline_seeded', '1')",
+                        [],
+                    )?;
+                    self.conn.execute_batch("COMMIT;")?;
+                    return Ok(imported);
+                }
+            }
+        }
+
+        let _ = self.conn.execute(
+            "INSERT OR REPLACE INTO meta (key, value) VALUES ('psreadline_seeded', '1')",
+            [],
+        );
+        Ok(0)
+    }
+
+    pub fn get_data_version(&self) -> i64 {
+        self.conn
+            .query_row("PRAGMA data_version", [], |r| r.get(0))
+            .unwrap_or(0)
     }
 
     pub fn record(
@@ -114,6 +198,7 @@ impl Database {
         Ok(id)
     }
 
+    #[allow(dead_code)]
     pub fn delete_history(&self, id: i64) -> Result<bool> {
         let rows = self.conn.execute("DELETE FROM history WHERE id = ?1", params![id])?;
         Ok(rows > 0)
@@ -132,16 +217,22 @@ impl Database {
         }
     }
 
-    pub fn get_local_history(&self, cwd: &str, limit: usize) -> Result<Vec<HistoryRecord>> {
+    pub fn get_local_history(
+        &self,
+        cwd: &str,
+        git_root: Option<&str>,
+        limit: usize,
+    ) -> Result<Vec<HistoryRecord>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, command, cwd, git_root, exit_code, duration_ms, created_at
+            "SELECT MAX(id) as max_id, command, cwd, git_root, exit_code, duration_ms, MAX(created_at), COUNT(*) as freq
              FROM history
-             WHERE cwd = ?1
-             ORDER BY id DESC
-             LIMIT ?2"
+             WHERE cwd = ?1 OR (?2 IS NOT NULL AND git_root = ?2)
+             GROUP BY command
+             ORDER BY CASE WHEN cwd = ?1 THEN 1 ELSE 0 END DESC, max_id DESC
+             LIMIT ?3",
         )?;
 
-        let rows = stmt.query_map(params![cwd, limit as i64], |row| {
+        let rows = stmt.query_map(params![cwd, git_root, limit as i64], |row| {
             Ok(HistoryRecord {
                 id: row.get(0)?,
                 command: row.get(1)?,
@@ -150,6 +241,7 @@ impl Database {
                 exit_code: row.get(4)?,
                 duration_ms: row.get(5)?,
                 created_at: row.get(6)?,
+                freq: row.get(7)?,
             })
         })?;
 
@@ -160,15 +252,17 @@ impl Database {
         Ok(results)
     }
 
-    pub fn get_global_history(&self, limit: usize) -> Result<Vec<HistoryRecord>> {
+    pub fn get_global_history(&self, exclude_cwd: &str, limit: usize) -> Result<Vec<HistoryRecord>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, command, cwd, git_root, exit_code, duration_ms, created_at
+            "SELECT MAX(id) as max_id, command, cwd, git_root, exit_code, duration_ms, MAX(created_at), COUNT(*) as freq
              FROM history
-             ORDER BY id DESC
-             LIMIT ?1"
+             WHERE cwd != ?1
+             GROUP BY command
+             ORDER BY max_id DESC
+             LIMIT ?2",
         )?;
 
-        let rows = stmt.query_map(params![limit as i64], |row| {
+        let rows = stmt.query_map(params![exclude_cwd, limit as i64], |row| {
             Ok(HistoryRecord {
                 id: row.get(0)?,
                 command: row.get(1)?,
@@ -177,6 +271,7 @@ impl Database {
                 exit_code: row.get(4)?,
                 duration_ms: row.get(5)?,
                 created_at: row.get(6)?,
+                freq: row.get(7)?,
             })
         })?;
 

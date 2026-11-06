@@ -4,16 +4,17 @@ use std::path::PathBuf;
 
 mod db;
 mod matcher;
+mod predictor;
 mod prober;
-mod tui;
 
 use db::Database;
+use predictor::PredictorEngine;
 use prober::Prober;
 
 #[derive(Parser)]
 #[command(
     name = "smart-hub",
-    about = "Context-Aware Smart Command & History Hub for PowerShell",
+    about = "Context-Aware 3-Tier Smart Command Predictor & History Hub for PowerShell",
     version
 )]
 struct Cli {
@@ -23,20 +24,19 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Launch interactive TUI search and return chosen command to stdout or file
-    Search {
-        /// Working directory to contextualize search
+    /// Run one-shot 3-tier prediction ([★ Smart], [● Local], [○ Global])
+    Predict {
+        /// Working directory to contextualize predictions
         #[arg(short, long)]
         cwd: Option<String>,
 
-        /// Initial search query
+        /// Input query string typed by user
         #[arg(short, long)]
-        query: Option<String>,
-
-        /// Write selected command to a file
-        #[arg(short, long)]
-        output_file: Option<String>,
+        query: String,
     },
+
+    /// Run persistent low-latency stdin/stdout worker for PowerShell ICommandPredictor
+    Serve,
 
     /// Record a command execution into SQLite
     Record {
@@ -73,7 +73,10 @@ enum Commands {
         sub: AliasCommands,
     },
 
-    /// Print PowerShell integration script for KeyBindings/PSReadLine
+    /// Print C# ICommandPredictor adapter source code
+    CsharpSource,
+
+    /// Print PowerShell integration script (PSReadLine + ICommandPredictor)
     Init,
 }
 
@@ -84,7 +87,7 @@ enum AliasCommands {
         /// Trigger word/keyword (e.g. 'g', 'dcup', 'skill開發')
         trigger: String,
 
-        /// Expanded command (e.g. 'git status', 'docker compose up -d')
+        /// Expanded command (e.g. 'git status -s', 'docker compose up -d')
         expansion: String,
 
         /// Optional description
@@ -106,6 +109,394 @@ enum AliasCommands {
     List,
 }
 
+const CSHARP_PREDICTOR_SOURCE: &str = r#"using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.IO;
+using System.Management.Automation;
+using System.Management.Automation.Subsystem;
+using System.Management.Automation.Subsystem.Prediction;
+using System.Text;
+using System.Threading;
+using System.Threading.Tasks;
+
+namespace SmartHub
+{
+    public sealed class TierBuckets
+    {
+        public readonly List<PredictiveSuggestion> Smart = new List<PredictiveSuggestion>();
+        public readonly List<PredictiveSuggestion> Local = new List<PredictiveSuggestion>();
+        public readonly List<PredictiveSuggestion> Global = new List<PredictiveSuggestion>();
+    }
+
+    public static class SmartHubBridge
+    {
+        private static readonly object _lock = new object();
+        private static Process _worker;
+        private static StreamWriter _stdin;
+        private static StreamReader _stdout;
+        private static bool _registered;
+
+        public static string ExePath;
+        public static PathIntrinsics SessionPath;
+        public static string FallbackCwd = Environment.CurrentDirectory;
+
+        private static string _lastCwd;
+        private static string _lastQuery;
+        private static long _lastTick;
+        private static TierBuckets _lastBuckets;
+
+        public static readonly Guid SmartId = new Guid("a1b2c3d4-1111-4000-8000-000000000001");
+        public static readonly Guid LocalId = new Guid("a1b2c3d4-2222-4000-8000-000000000002");
+        public static readonly Guid GlobalId = new Guid("a1b2c3d4-3333-4000-8000-000000000003");
+
+        public static void RegisterAll(string exePath, PathIntrinsics sessionPath)
+        {
+            ExePath = exePath;
+            SessionPath = sessionPath;
+            InvalidateCache();
+
+            if (!_registered)
+            {
+                TryUnregister(SmartId);
+                TryUnregister(LocalId);
+                TryUnregister(GlobalId);
+
+                SubsystemManager.RegisterSubsystem(
+                    SubsystemKind.CommandPredictor,
+                    new TierCommandPredictor(SmartId, "★ Smart", "Smart-Hub Project & Virtual Alias Predictor", 'S', true)
+                );
+                SubsystemManager.RegisterSubsystem(
+                    SubsystemKind.CommandPredictor,
+                    new TierCommandPredictor(LocalId, "● Local", "Smart-Hub Current Directory & Git Repo History Predictor", 'L', false)
+                );
+                SubsystemManager.RegisterSubsystem(
+                    SubsystemKind.CommandPredictor,
+                    new TierCommandPredictor(GlobalId, "○ Global", "Smart-Hub Global SQLite History Predictor", 'G', false)
+                );
+                _registered = true;
+            }
+
+            Task.Run((Action)WarmUp);
+        }
+
+        private static void TryUnregister(Guid id)
+        {
+            try { SubsystemManager.UnregisterSubsystem(SubsystemKind.CommandPredictor, id); }
+            catch { }
+        }
+
+        public static void WarmUp()
+        {
+            try
+            {
+                QueryTier('S', "_warmup_", CancellationToken.None);
+            }
+            catch { }
+        }
+
+        public static void InvalidateCache()
+        {
+            lock (_lock)
+            {
+                _lastTick = 0;
+                _lastBuckets = null;
+            }
+        }
+
+        private static string GetCurrentCwd()
+        {
+            try
+            {
+                var p = SessionPath?.CurrentFileSystemLocation?.ProviderPath;
+                if (!string.IsNullOrEmpty(p)) return p;
+            }
+            catch { }
+            return FallbackCwd ?? Environment.CurrentDirectory;
+        }
+
+        private static bool EnsureWorkerLocked()
+        {
+            if (_worker != null && !_worker.HasExited && _stdin != null && _stdout != null)
+            {
+                return true;
+            }
+            KillWorkerLocked();
+            if (string.IsNullOrEmpty(ExePath) || !File.Exists(ExePath))
+            {
+                return false;
+            }
+
+            var utf8NoBom = new UTF8Encoding(false);
+            var psi = new ProcessStartInfo
+            {
+                FileName = ExePath,
+                Arguments = "serve",
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                RedirectStandardInput = true,
+                RedirectStandardOutput = true,
+                RedirectStandardError = false,
+                StandardInputEncoding = utf8NoBom,
+                StandardOutputEncoding = utf8NoBom
+            };
+
+            _worker = Process.Start(psi);
+            if (_worker == null) return false;
+            _stdin = _worker.StandardInput;
+            _stdout = _worker.StandardOutput;
+            return true;
+        }
+
+        private static void KillWorkerLocked()
+        {
+            try { _stdin?.Dispose(); } catch { }
+            try { _stdout?.Dispose(); } catch { }
+            try
+            {
+                if (_worker != null && !_worker.HasExited) _worker.Kill();
+                _worker?.Dispose();
+            }
+            catch { }
+            _stdin = null;
+            _stdout = null;
+            _worker = null;
+        }
+
+        private static string EscapeField(string s)
+        {
+            if (string.IsNullOrEmpty(s)) return "";
+            var sb = new StringBuilder(s.Length);
+            foreach (char c in s)
+            {
+                switch (c)
+                {
+                    case '\\': sb.Append("\\\\"); break;
+                    case '\t': sb.Append("\\t"); break;
+                    case '\n': sb.Append("\\n"); break;
+                    case '\r': sb.Append("\\r"); break;
+                    default: sb.Append(c); break;
+                }
+            }
+            return sb.ToString();
+        }
+
+        private static string UnescapeField(string s)
+        {
+            if (string.IsNullOrEmpty(s) || s.IndexOf('\\') < 0) return s ?? "";
+            var sb = new StringBuilder(s.Length);
+            for (int i = 0; i < s.Length; i++)
+            {
+                char c = s[i];
+                if (c == '\\' && i + 1 < s.Length)
+                {
+                    char next = s[++i];
+                    switch (next)
+                    {
+                        case '\\': sb.Append('\\'); break;
+                        case 't': sb.Append('\t'); break;
+                        case 'n': sb.Append('\n'); break;
+                        case 'r': sb.Append('\r'); break;
+                        default: sb.Append('\\'); sb.Append(next); break;
+                    }
+                }
+                else
+                {
+                    sb.Append(c);
+                }
+            }
+            return sb.ToString();
+        }
+
+        public static List<PredictiveSuggestion> QueryTier(char tier, string input, CancellationToken ct)
+        {
+            if (string.IsNullOrWhiteSpace(input) || ct.IsCancellationRequested)
+                return null;
+
+            string cwd = GetCurrentCwd();
+            TierBuckets buckets;
+
+            lock (_lock)
+            {
+                long now = Environment.TickCount64;
+                if (_lastBuckets != null &&
+                    now - _lastTick < 250 &&
+                    string.Equals(_lastQuery, input, StringComparison.Ordinal) &&
+                    string.Equals(_lastCwd, cwd, StringComparison.OrdinalIgnoreCase))
+                {
+                    buckets = _lastBuckets;
+                }
+                else
+                {
+                    buckets = FetchBucketsLocked(cwd, input);
+                    _lastCwd = cwd;
+                    _lastQuery = input;
+                    _lastTick = Environment.TickCount64;
+                    _lastBuckets = buckets;
+                }
+            }
+
+            if (buckets == null) return null;
+            List<PredictiveSuggestion> list = tier switch
+            {
+                'S' => buckets.Smart,
+                'L' => buckets.Local,
+                'G' => buckets.Global,
+                _ => null
+            };
+            return (list != null && list.Count > 0) ? list : null;
+        }
+
+        private static TierBuckets FetchBucketsLocked(string cwd, string query)
+        {
+            try
+            {
+                if (!EnsureWorkerLocked()) return null;
+                _stdin.Write("PREDICT\t");
+                _stdin.Write(EscapeField(cwd));
+                _stdin.Write('\t');
+                _stdin.WriteLine(EscapeField(query));
+                _stdin.Flush();
+
+                string header = _stdout.ReadLine();
+                if (header == null || !header.StartsWith("OK\t", StringComparison.Ordinal))
+                {
+                    KillWorkerLocked();
+                    return null;
+                }
+
+                if (!int.TryParse(header.Substring(3), out int count) || count < 0)
+                {
+                    return null;
+                }
+
+                var buckets = new TierBuckets();
+                for (int i = 0; i < count; i++)
+                {
+                    string row = _stdout.ReadLine();
+                    if (row == null)
+                    {
+                        KillWorkerLocked();
+                        return null;
+                    }
+                    int t1 = row.IndexOf('\t');
+                    if (t1 <= 0) continue;
+                    int t2 = row.IndexOf('\t', t1 + 1);
+                    char tier = row[0];
+                    string cmd = t2 > t1
+                        ? UnescapeField(row.Substring(t1 + 1, t2 - t1 - 1))
+                        : UnescapeField(row.Substring(t1 + 1));
+                    string tip = t2 > t1
+                        ? UnescapeField(row.Substring(t2 + 1))
+                        : null;
+
+                    var suggestion = string.IsNullOrEmpty(tip)
+                        ? new PredictiveSuggestion(cmd)
+                        : new PredictiveSuggestion(cmd, tip);
+
+                    switch (tier)
+                    {
+                        case 'S': buckets.Smart.Add(suggestion); break;
+                        case 'L': buckets.Local.Add(suggestion); break;
+                        case 'G': buckets.Global.Add(suggestion); break;
+                    }
+                }
+                return buckets;
+            }
+            catch
+            {
+                KillWorkerLocked();
+                return null;
+            }
+        }
+
+        public static void RecordExecutionAsync(string commandLine, bool success)
+        {
+            if (string.IsNullOrWhiteSpace(commandLine)) return;
+            string cwd = GetCurrentCwd();
+            int exitCode = success ? 0 : 1;
+
+            Task.Run(() =>
+            {
+                lock (_lock)
+                {
+                    _lastTick = 0;
+                    _lastBuckets = null;
+                    try
+                    {
+                        if (!EnsureWorkerLocked()) return;
+                        _stdin.Write("RECORD\t");
+                        _stdin.Write(EscapeField(cwd));
+                        _stdin.Write('\t');
+                        _stdin.Write(exitCode);
+                        _stdin.Write('\t');
+                        _stdin.WriteLine(EscapeField(commandLine.Trim()));
+                        _stdin.Flush();
+                        _stdout.ReadLine();
+                    }
+                    catch
+                    {
+                        KillWorkerLocked();
+                    }
+                }
+            });
+        }
+    }
+
+    public sealed class TierCommandPredictor : ICommandPredictor
+    {
+        private readonly Guid _id;
+        private readonly string _name;
+        private readonly string _description;
+        private readonly char _tier;
+        private readonly bool _recordHistory;
+
+        public TierCommandPredictor(Guid id, string name, string description, char tier, bool recordHistory)
+        {
+            _id = id;
+            _name = name;
+            _description = description;
+            _tier = tier;
+            _recordHistory = recordHistory;
+        }
+
+        public Guid Id => _id;
+        public string Name => _name;
+        public string Description => _description;
+
+        public SuggestionPackage GetSuggestion(PredictionClient client, PredictionContext context, CancellationToken cancellationToken)
+        {
+            string input = context.InputAst?.Extent?.Text;
+            if (string.IsNullOrWhiteSpace(input)) return default;
+
+            var list = SmartHubBridge.QueryTier(_tier, input, cancellationToken);
+            if (list != null && list.Count > 0)
+            {
+                return new SuggestionPackage(list);
+            }
+            return default;
+        }
+
+        public bool CanAcceptFeedback(PredictionClient client, PredictorFeedbackKind feedback)
+        {
+            return _recordHistory && feedback == PredictorFeedbackKind.CommandLineExecuted;
+        }
+
+        public void OnSuggestionDisplayed(PredictionClient client, uint session, int countOrIndex) { }
+        public void OnSuggestionAccepted(PredictionClient client, uint session, string acceptedSuggestion) { }
+        public void OnCommandLineAccepted(PredictionClient client, IReadOnlyList<string> history) { }
+
+        public void OnCommandLineExecuted(PredictionClient client, string commandLine, bool success)
+        {
+            if (_recordHistory)
+            {
+                SmartHubBridge.RecordExecutionAsync(commandLine, success);
+            }
+        }
+    }
+}
+"#;
+
 fn main() {
     let cli = Cli::parse();
     let db = match Database::open_default() {
@@ -117,32 +508,28 @@ fn main() {
     };
 
     match cli.command {
-        Commands::Search { cwd, query, output_file } => {
+        Commands::Predict { cwd, query } => {
             let current_dir = cwd.unwrap_or_else(|| {
                 env::current_dir()
                     .unwrap_or_else(|_| PathBuf::from("."))
                     .to_string_lossy()
                     .to_string()
             });
-
-            match tui::run_tui(&db, &current_dir, query.as_deref()) {
-                Ok(Some(selected_cmd)) => {
-                    if let Some(out_path) = output_file {
-                        let _ = std::fs::write(out_path, &selected_cmd);
-                    } else {
-                        print!("{}", selected_cmd);
-                    }
-                    std::process::exit(0);
-                }
-                Ok(None) => {
-                    // Cancelled by user (Esc / Ctrl+C)
-                    std::process::exit(1);
-                }
-                Err(e) => {
-                    eprintln!("TUI error: {}", e);
-                    std::process::exit(1);
-                }
+            let mut engine = PredictorEngine::new();
+            let items = engine.predict(&db, &current_dir, &query);
+            for it in items {
+                let badge = match it.tier {
+                    'S' => "[★ Smart]",
+                    'L' => "[● Local]",
+                    'G' => "[○ Global]",
+                    _ => "[?]",
+                };
+                println!("{:10} {:45} # {}", badge, it.command, it.tooltip);
             }
+        }
+
+        Commands::Serve => {
+            predictor::run_serve(&db);
         }
 
         Commands::Record {
@@ -174,7 +561,7 @@ fn main() {
 
         Commands::DeleteLast => match db.delete_last() {
             Ok(Some(cmd)) => {
-                println!("✓ 已刪除上一條歷史記錄: {}", cmd);
+                println!("✓ 已從 SQLite 歷史刪除上一條指令: {}", cmd);
             }
             Ok(None) => {
                 println!("歷史記錄為空");
@@ -250,44 +637,88 @@ fn main() {
             },
         },
 
-        Commands::Init => {
-            print!(
-                r#"# Smart-Hub KeyBindings Integration for PowerShell
-$script:SmartHubExe = (Get-Command smart-hub -ErrorAction SilentlyContinue)?.Source
-if (-not $script:SmartHubExe) {{
-    $script:SmartHubExe = "$PSScriptRoot\engine\target\release\smart-hub.exe"
-}}
+        Commands::CsharpSource => {
+            print!("{}", CSHARP_PREDICTOR_SOURCE);
+        }
 
-if (Test-Path $script:SmartHubExe) {{
-    # 註冊 Ctrl+R 啟動智能分層歷史與情境清單
-    Set-PSReadLineKeyHandler -Chord "Ctrl+r" -ScriptBlock {{
+        Commands::Init => {
+            let exe_path = env::current_exe()
+                .unwrap_or_else(|_| PathBuf::from("smart-hub.exe"))
+                .to_string_lossy()
+                .to_string();
+            let dll_path = env::current_exe()
+                .ok()
+                .and_then(|p| p.parent().map(|dir| dir.join("SmartHub.Predictor.dll")))
+                .unwrap_or_else(|| PathBuf::from("SmartHub.Predictor.dll"))
+                .to_string_lossy()
+                .to_string();
+
+            print!(
+                r#"if ([System.Environment]::UserInteractive -and -not [Console]::IsOutputRedirected) {{
+    $global:SmartHubExe = '{exe_path}'
+    $smartHubDll = '{dll_path}'
+
+    if (-not ('SmartHub.SmartHubBridge' -as [type])) {{
+        if (Test-Path -LiteralPath $smartHubDll) {{
+            [System.Reflection.Assembly]::Load([System.IO.File]::ReadAllBytes($smartHubDll)) | Out-Null
+        }} else {{
+            $cs = & $global:SmartHubExe csharp-source | Out-String
+            Add-Type -TypeDefinition $cs -ErrorAction SilentlyContinue
+        }}
+    }}
+
+    if ('SmartHub.SmartHubBridge' -as [type]) {{
+        [SmartHub.SmartHubBridge]::RegisterAll($global:SmartHubExe, $ExecutionContext.SessionState.Path)
+        Set-PSReadLineOption -PredictionSource Plugin
+    }} else {{
+        Set-PSReadLineOption -PredictionSource HistoryAndPlugin
+    }}
+
+    Set-PSReadLineOption -PredictionViewStyle ListView
+    Set-PSReadLineOption -Colors @{{ InlinePrediction = "$([char]0x1b)[38;5;245m" }}
+    Set-PSReadLineOption -MaximumHistoryCount 30000
+    Set-PSReadLineOption -HistoryNoDuplicates
+    Set-PSReadLineOption -HistorySearchCursorMovesToEnd
+
+    Set-PSReadLineKeyHandler -Chord "UpArrow" -Function HistorySearchBackward
+    Set-PSReadLineKeyHandler -Chord "DownArrow" -Function HistorySearchForward
+    Set-PSReadLineKeyHandler -Chord "Tab" -Function TabCompleteNext
+    Set-PSReadLineKeyHandler -Chord "Shift+Tab" -Function TabCompletePrevious
+
+    # Alt+Backspace: 即刻從 SQLite 歷史中刪除上一筆打錯的指令並刷新預測快取
+    Set-PSReadLineKeyHandler -Chord "Alt+Backspace" -ScriptBlock {{
+        param($key, $arg)
+        & $global:SmartHubExe delete-last | Out-Host
+        if ('SmartHub.SmartHubBridge' -as [type]) {{
+            [SmartHub.SmartHubBridge]::InvalidateCache()
+        }}
+        [Microsoft.PowerShell.PSConsoleReadLine]::InvokePrompt()
+    }}
+
+    # 右方向鍵：行內移動一格，行尾補全下一個單字
+    Set-PSReadLineKeyHandler -Chord "RightArrow" -ScriptBlock {{
         param($key, $arg)
         $line = $null
         $cursor = $null
         [Microsoft.PowerShell.PSConsoleReadLine]::GetBufferState([ref]$line, [ref]$cursor)
-
-        $cwd = (Get-Location).Path
-        $psi = New-Object System.Diagnostics.ProcessStartInfo
-        $psi.FileName = $script:SmartHubExe
-        $psi.Arguments = "search --cwd `"$cwd`" --query `"$line`""
-        $psi.UseShellExecute = $false
-        $psi.RedirectStandardOutput = $true
-        $psi.StandardOutputEncoding = [System.Text.Encoding]::UTF8
-
-        $p = [System.Diagnostics.Process]::Start($psi)
-        $output = $p.StandardOutput.ReadToEnd()
-        $p.WaitForExit()
-
-        if ($p.ExitCode -eq 0 -and $output) {{
-            [Microsoft.PowerShell.PSConsoleReadLine]::RevertLine()
-            [Microsoft.PowerShell.PSConsoleReadLine]::Insert($output)
+        if ($cursor -lt $line.Length) {{
+            [Microsoft.PowerShell.PSConsoleReadLine]::ForwardChar()
+        }} else {{
+            [Microsoft.PowerShell.PSConsoleReadLine]::AcceptNextSuggestionWord()
         }}
     }}
 
-    # 註冊 Alt+Backspace 即時刪除上一筆打錯的指令
-    Set-PSReadLineKeyHandler -Chord "Alt+Backspace" -ScriptBlock {{
+    # Ctrl + 右方向鍵：行內跳至下一個單字，行尾接受整行預測
+    Set-PSReadLineKeyHandler -Chord "Ctrl+RightArrow" -ScriptBlock {{
         param($key, $arg)
-        & $script:SmartHubExe delete-last
+        $line = $null
+        $cursor = $null
+        [Microsoft.PowerShell.PSConsoleReadLine]::GetBufferState([ref]$line, [ref]$cursor)
+        if ($cursor -lt $line.Length) {{
+            [Microsoft.PowerShell.PSConsoleReadLine]::NextWord()
+        }} else {{
+            [Microsoft.PowerShell.PSConsoleReadLine]::AcceptSuggestion()
+        }}
     }}
 }}
 "#
