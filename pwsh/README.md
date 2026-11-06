@@ -20,8 +20,13 @@
 4. **環境安全防護**：
    - 僅在 `UserInteractive` 且未重導向輸出時啟用，避免在背景或 Agent 執行時報錯。
 
-5. **Atuin 智慧歷史整合 (可選，目錄感知優先)**：
-   - 自動偵測系統是否安裝 Atuin (`winget install atuinsh.atuin`)。若存在則啟用 SQLite 毫秒級索引，按 `UpArrow` 或 `Ctrl+R` 時優先展示當前目錄執行過的指令，並保留原有的 Tab 輪替與右鍵採納體驗。
+5. **Smart-Hub 原生引擎整合 (Rust + SQLite，取代 Atuin)**：
+   - 內建專為 PowerShell 與 Windows 設計的輕量 Rust 引擎 (`smart-hub`)：
+     - **三層候選 TUI (`Ctrl+R`)**：分層呈現 `[★ Smart/Alias]` (專案指令與虛別名)、`[● Local]` (當前資料夾與 Git 專案歷史)、`[○ Global]` (全域歷史)。
+     - **即刻刪除打錯指令**：在 `Ctrl+R` 面板中對選中項目按 `Delete` / `Alt+D`，或在命令列隨時按 `Alt+Backspace` 立即從 SQLite 中剔除上一筆歷史。
+     - **專案環境自適應探針**：自動識別 Cargo (Rust)、pnpm/yarn/npm (Node.js 萃取 `package.json` scripts)、uv/venv (Python)、Docker Compose，動態注入可用操作。
+     - **虛別名系統 (Virtual Aliases)**：避免 PowerShell 全域別名污染與衝突，支援多候選推薦。
+     - **無感背景寫入**：指令執行後在背景非同步寫入 SQLite (WAL 模式)，終端零卡頓。
 
 ---
 

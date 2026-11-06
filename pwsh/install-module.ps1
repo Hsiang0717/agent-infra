@@ -82,6 +82,12 @@ if ($Copy) {
         New-Item -ItemType Directory -Path $moduleDestDir -Force | Out-Null
         Copy-Item -Path $psm1Path -Destination $moduleDestDir -Force
         Copy-Item -Path $psd1Path -Destination $moduleDestDir -Force
+        $exePath = Join-Path $sourceDir "engine\target\release\smart-hub.exe"
+        if (Test-Path $exePath) {
+            $destEngineDir = Join-Path $moduleDestDir "engine\target\release"
+            New-Item -ItemType Directory -Path $destEngineDir -Force | Out-Null
+            Copy-Item -Path $exePath -Destination $destEngineDir -Force
+        }
     }
 } else {
     Write-Host "==> [Install Mode: Symlink] Linking directory $sourceDir -> $moduleDestDir..." -ForegroundColor Cyan

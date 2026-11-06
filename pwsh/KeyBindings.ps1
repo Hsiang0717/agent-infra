@@ -23,9 +23,62 @@ if ([System.Environment]::UserInteractive -and -not [Console]::IsOutputRedirecte
     Set-PSReadLineKeyHandler -Chord "UpArrow" -Function HistorySearchBackward
     Set-PSReadLineKeyHandler -Chord "DownArrow" -Function HistorySearchForward
 
-    # Atuin 智慧歷史引擎 (當前目錄優先、SQLite 索引與歷史搜尋)
-    if (Get-Command atuin -ErrorAction SilentlyContinue) {
-        atuin init powershell | Out-String | Invoke-Expression
+    # =====================================================================
+    # 🚀 Smart-Hub 智慧歷史、環境感知與虛別名引擎 (Rust + SQLite)
+    # =====================================================================
+    $smartHubExe = (Get-Command smart-hub -ErrorAction SilentlyContinue)?.Source
+    if (-not $smartHubExe) {
+        $candidate = Join-Path $PSScriptRoot "engine\target\release\smart-hub.exe"
+        if (Test-Path $candidate) {
+            $smartHubExe = $candidate
+        }
+    }
+
+    if ($smartHubExe) {
+        # Ctrl+R: 喚起 Smart-Hub 三層互動清單 (Smart/Alias, Local, Global)
+        Set-PSReadLineKeyHandler -Chord "Ctrl+r" -ScriptBlock {
+            param($key, $arg)
+            $line = $null
+            $cursor = $null
+            [Microsoft.PowerShell.PSConsoleReadLine]::GetBufferState([ref]$line, [ref]$cursor)
+
+            $cwd = (Get-Location).Path
+            $psi = New-Object System.Diagnostics.ProcessStartInfo
+            $psi.FileName = $smartHubExe
+            $psi.Arguments = "search --cwd `"$cwd`" --query `"$line`""
+            $psi.UseShellExecute = $false
+            $psi.RedirectStandardOutput = $true
+            $psi.StandardOutputEncoding = [System.Text.Encoding]::UTF8
+
+            $p = [System.Diagnostics.Process]::Start($psi)
+            $output = $p.StandardOutput.ReadToEnd()
+            $p.WaitForExit()
+
+            if ($p.ExitCode -eq 0 -and $output) {
+                [Microsoft.PowerShell.PSConsoleReadLine]::RevertLine()
+                [Microsoft.PowerShell.PSConsoleReadLine]::Insert($output)
+            }
+        }
+
+        # Alt+Backspace: 即刻從 SQLite 歷史中刪除上一筆打錯的指令
+        Set-PSReadLineKeyHandler -Chord "Alt+Backspace" -ScriptBlock {
+            param($key, $arg)
+            & $smartHubExe delete-last
+        }
+
+        # 自動非同步寫入指令歷史至 SQLite
+        $existingHandler = (Get-PSReadLineOption).AddToHistoryHandler
+        Set-PSReadLineOption -AddToHistoryHandler {
+            param($command)
+            if ($command -and -not [string]::IsNullOrWhiteSpace($command)) {
+                $cwd = (Get-Location).Path
+                Start-Process -FilePath $smartHubExe -ArgumentList @("record", "--command", $command, "--cwd", $cwd) -WindowStyle Hidden
+            }
+            if ($existingHandler) {
+                return & $existingHandler $command
+            }
+            return $true
+        }
     }
 
     # Tab 鍵：全面回歸最順暢的「行內逐項輪替」，絕不彈出干擾輸入的選單
