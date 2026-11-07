@@ -107,7 +107,7 @@ fn default_nominal_message() -> String {
 }
 
 fn default_tight_message() -> String {
-    "[Context Posture: TIGHT] Working memory is tightening. Constrain read slices and offload expansive exploration to the research subagent.".to_string()
+    "[Context Posture: TIGHT] Working memory is tightening. Avoid blind full-file dumps (use outline/rg; offload broad cross-file audits to research subagent). If a fix failed, do NOT repeat local tweaks—trace the upstream causal chain first.".to_string()
 }
 
 fn default_critical_message() -> String {

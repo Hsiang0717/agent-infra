@@ -11,9 +11,9 @@ description: "Enforce Windows pwsh environment, agent-native CLI tools (rg, fd, 
 
 - **Inspection, Search & Editing Hierarchy (Native Tools First):**
   - **1. Directory & Scale Discovery:** Always use `lsj [path]` (compact JSON with exact byte size `"b"`) or `topj [count] [path]` to inspect topology and file sizes, or `fd [pattern]` for file search (auto-ignores `.git`/`node_modules`). Never run raw shell listing commands (`Get-ChildItem`, `dir`, `ls`, `tree`), which bloat tokens and truncate columns.
-  - **2. Pre-Read Outline Gate & Scoped Reading:**
-    - Use native `read_file` with explicit `StartLine` and `EndLine` slices (30-80 lines). Never run raw shell dump or context-slicing commands (`cat`, `type`, `Get-Content`, `Select-String`).
-    - For modules >300 lines (`"b" > 10000` in `lsj`), never call unbounded `read_file` on the whole file: run `outline <file>` (or `rg -n <pattern> <file>`) first to pinpoint exact line coordinates, then read only the targeted slice.
+  - **2. Pre-Read Outline Gate & Logical-Unit Slicing:**
+    - Use native `read_file` with explicit `StartLine` and `EndLine` parameters sized to capture the **complete logical unit** (full function, state handler, or struct block—typically 40–120 lines; files `<300` lines may be read directly). Never run raw shell dump or context-slicing commands (`cat`, `type`, `Get-Content`, `Select-String`).
+    - For modules >300 lines (`"b" > 10000` in `lsj`), never call unbounded `read_file` on the whole file: run `outline <file>` (or `rg -n <pattern> <file>`) first to pinpoint exact structural coordinates, then read the complete targeted logical unit without chopping functions in half.
   - **3. Code Search & Structural Precision (Funnel Protocol):**
     - Use `rg -n <pattern> <path>` for fast, targeted code and text searches (always pass an explicit `<path>` such as `src/` or `.` so `rg` never blocks waiting on non-TTY piped stdin). Suppress noise by narrowing query terms or scoping to specific subdirectories.
   - **4. Surgical File Editing Protocol (Minimal Unique Target):**

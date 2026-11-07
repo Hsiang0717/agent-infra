@@ -64,6 +64,15 @@ Antigravity (AGY) 是定位於 **Staff Software Engineer（資深主任軟體工
   1. 每條踩坑經驗嚴格限制在 3 行以內高密度條目，平時不塞進 Prompt，僅在排查疑難時以 `rg` 實證探測。
   2. 當系統處於 `TIGHT` 姿態時，將大範圍探測或日誌審計外包給 `research` subagent，依據嚴格輸出合約僅傳回結論座標，保證主工作記憶體整潔。
 
+### 7. 「吸管視野與長對話收斂緊箍咒」的校準 (Causal-Chain Completeness vs. Myopic Slicing)
+- **歷史教訓**：在複雜非同步或狀態機專案（如 `rs-yt-player`）的長對話除錯中，輕量模型（Flash）高度服從機械式約束（如「每次只讀 30–80 行」與 `TIGHT` 姿態下的「直接鎖定目標修改點並收斂」）。這導致兩個嚴重副作用：
+  1. *吸管視野（Straw-View Myopia）*：為湊足 30–80 行限制而將完整函式或狀態流轉腰斬，只見報錯點（Symptom）不見上下游因果鏈（Causal Chain）。
+  2. *長對話收斂陷阱（Premature Convergence under TIGHT）*：當對話超過 60% 觸發 `TIGHT` 時，舊版提示命令模型「只讀目標修改點並收斂」，使 Flash 在修改失敗後不敢跨檔案追查上游根因，陷入在同一處反覆微調（Local Ping-Pong）的死胡同。
+- **演進決策**：將 Argon 等級的「系統因果推理」顯性化植入協議：
+  1. **完整邏輯單元切片（Logical-Unit Slicing）**：大檔（`>300` 行）仍以 `outline` 先行，但切片大小以**完整涵蓋整個邏輯單元（函式、狀態處理器、結構體實作，通常 40–120 行；`<300` 行小檔可直接讀取）**為準，嚴禁腰斬控制流。
+  2. **因果鏈追蹤優先（Causal-Chain Tracing: Symptom ≠ Root Cause）**：動刀修 Bug 前，必須先確認 `Upstream Producer / Caller ➔ State / Channel / Lifecycle ➔ Downstream Consumer / Callback` 的完整流向，確認狀態在何處被初始化、變更或非同步覆寫。
+  3. **2-Strike 第一性原理重置（First-Principles Reset）與 `TIGHT` 解綁**：將 `TIGHT` 定義為「避免無腦全檔傾倒（善用 `outline`/`rg` 與 `research` subagent），但絕不為省 Token 犧牲根因追查」；一旦連續 1–2 次局部修改未解決問題，強制停止在原處刮痧，先質疑既有假設（是否有其他執行緒/回呼/生命週期覆寫）並擴大上下游排查半徑。
+
 ---
 
 ## 🧩 三、四大階段生命週期與邊界決策 (The 4-Phase Lifecycle)
