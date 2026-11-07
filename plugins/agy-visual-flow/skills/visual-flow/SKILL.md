@@ -7,11 +7,15 @@ description: AI-native visual perception and deterministic RPA suite for autonom
 
 AI-native visual perception and deterministic RPA tool powered by a high-performance standalone Rust binary (`agy-visual-flow.exe`). Provides end-to-end visual grounding, motion UX inspection, and deterministic interaction:
 
-1. **Autonomous Window & Screen Perception**: DirectX / Windows.Graphics.Capture (WGC) with fallback to GDI for robust, multi-desktop UI verification.
-2. **Vision Transformer (ViT) Tile Optimization (Default)**: Automatically scales images to proportional max-dimensions (default 1024px) snapped to 64px boundaries, eliminating fragmented tiles and maximizing OCR/layout clarity with minimal token overhead.
-3. **Hierarchical Dual-Grid Targeting (`--grid`)**: Injects high-contrast macro boundaries (`A1..D4`) and subtle micro subcells (`1..9` keypad order) onto screenshots for zero-CV black-box element localization.
+1. **Autonomous Window & Screen Perception**: DirectX / Windows.Graphics.Capture (WGC) with fallback to GDI for robust, multi-desktop UI verification with native Per-Monitor V2 DPI awareness.
+2. **Vision Transformer (ViT) Tile Optimization & Auto-Scaling**: Automatically scales images to proportional max-dimensions (default 1024px) snapped to 64px boundaries, eliminating fragmented tiles and maximizing OCR/layout clarity with minimal token overhead. Emits sidecar `.meta.json` with exact scale ratios.
+3. **Hierarchical Dual-Grid Targeting (`--grid`)**: Injects high-contrast macro boundaries (`A1..D4`) and subtle micro subcells (`1..9` keypad order) onto screenshots. Automatically resolves against target window client rect for zero-drift clicks.
 4. **Motion UX Storyboard (`--storyboard [sec]`)**: Captures sequential interaction frames across 1-10 seconds and stitches them into a compact **768x768 2x2 grid** (`STEP 1..4`), enabling rapid diagnostic of layout shift, animations, and transitions.
-5. **Deterministic RPA Click (`--click <grid|x,y>`)**: Executes zero-latency focus assurance, direct cursor placement, and full `DOWN -> UP` event-pair firing without human-like delays.
+5. **Deterministic RPA Click & Auto Scale (`--click <grid|x,y>`)**:
+   - Focus assurance & cursor placement without human delays.
+   - `--auto-scale`: Automatically scales coordinates from the captured ViT image resolution back to window/screen physical pixels.
+   - `--scale-from <w,h>` / `--from-image <path>`: Explicit scale source mapping.
+   - `--double`: Deterministic double-click execution (Down -> Up -> Down -> Up).
 6. **Collaborative Interactive Snip (`--snip`)**: Triggers Windows Snipping Tool for user-assisted cropping and annotation.
 
 ---
@@ -26,11 +30,26 @@ AI-native visual perception and deterministic RPA tool powered by a high-perform
 
 ### Standard Inspection with ViT Tile Optimization:
 ```powershell
-# Capture window by process name with ViT tile boundary alignment (e.g. 1024x576)
+# Capture window by process name or title with ViT tile boundary alignment (e.g. 1024x576)
 <bin>/agy-visual-flow.exe --name "msedge" --out "scratch/ui.png"
 
 # Inspect list of active windows
 <bin>/agy-visual-flow.exe --list
+```
+
+### Deterministic Click with Auto-Scale or Grid:
+```powershell
+# Auto-scale click using coordinates directly measured from ViT image (e.g. 280, 21):
+<bin>/agy-visual-flow.exe --window "YouTube Audio Player" --click "280,21" --auto-scale
+
+# Explicit canvas scaling:
+<bin>/agy-visual-flow.exe --window "YouTube Audio Player" --click "280,21" --scale-from 704,576
+
+# Double-click:
+<bin>/agy-visual-flow.exe --window "YouTube Audio Player" --click "150,120" --auto-scale --double
+
+# Hierarchical dual-grid targeting (auto-resolved to window client dimensions):
+<bin>/agy-visual-flow.exe --window "YouTube Audio Player" --click "B3-5"
 ```
 
 ### Black-Box Hierarchical Grid Targeting:

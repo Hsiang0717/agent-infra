@@ -63,6 +63,7 @@ struct WindowInfo {
     pid: u32,
     process_name: String,
     title: String,
+    #[allow(dead_code)]
     rect: RECT,
     is_virtual_desktop: bool,
 }
@@ -92,6 +93,10 @@ struct CliOptions {
     raw_unoptimized: bool,
     max_dim: u32,
     storyboard_secs: Option<u64>,
+    scale_from: Option<(u32, u32)>,
+    from_image: Option<PathBuf>,
+    auto_scale: bool,
+    double_click: bool,
 }
 
 struct ConsoleGuard(HWND);
@@ -424,6 +429,10 @@ fn parse_cli_args() -> std::result::Result<CliOptions, String> {
     let mut raw_unoptimized = false;
     let mut max_dim = image_opt::DEFAULT_MAX_DIMENSION;
     let mut storyboard_secs = None;
+    let mut scale_from = None;
+    let mut from_image = None;
+    let mut auto_scale = false;
+    let mut double_click = false;
 
     let mut i = 1;
     while i < args.len() {
@@ -525,9 +534,35 @@ fn parse_cli_args() -> std::result::Result<CliOptions, String> {
             "--with-border" => {
                 no_border = false;
             }
+            "--scale-from" => {
+                i += 1;
+                if i >= args.len() {
+                    return Err(String::from("Missing value for --scale-from"));
+                }
+                let parts: Vec<&str> = args[i].split(&[',', 'x', 'X'][..]).collect();
+                if parts.len() != 2 {
+                    return Err(format!("Invalid --scale-from '{}'. Expected W,H or WxH, e.g. 1024,576", args[i]));
+                }
+                let w = parts[0].trim().parse::<u32>().map_err(|_| format!("Invalid width: {}", parts[0]))?;
+                let h = parts[1].trim().parse::<u32>().map_err(|_| format!("Invalid height: {}", parts[1]))?;
+                scale_from = Some((w, h));
+            }
+            "--from-image" => {
+                i += 1;
+                if i >= args.len() {
+                    return Err(String::from("Missing value for --from-image"));
+                }
+                from_image = Some(PathBuf::from(&args[i]));
+            }
+            "--auto-scale" | "--scale" => {
+                auto_scale = true;
+            }
+            "--double" | "--double-click" => {
+                double_click = true;
+            }
             "-h" | "--help" => {
                 return Err(String::from(
-                    "Usage: agy-visual-flow.exe [--name <process>] [--title <title>] [--pid <id>] [--fullscreen] [--snip] [--click <grid|x,y>] [--grid] [--storyboard [sec]] [--raw] [--max-dim <px>] [--timeout <sec>] [--list] [--out <path>]"
+                    "Usage: agy-visual-flow.exe [--name <process>] [--title <title>] [--pid <id>] [--fullscreen] [--snip] [--click <grid|x,y>] [--double] [--scale-from <w,h>] [--from-image <path>] [--auto-scale] [--grid] [--storyboard [sec]] [--raw] [--max-dim <px>] [--timeout <sec>] [--list] [--out <path>]"
                 ));
             }
             other => {
@@ -571,6 +606,10 @@ fn parse_cli_args() -> std::result::Result<CliOptions, String> {
         raw_unoptimized,
         max_dim,
         storyboard_secs,
+        scale_from,
+        from_image,
+        auto_scale,
+        double_click,
     })
 }
 
@@ -896,17 +935,11 @@ fn post_process_and_save_image(
     enable_grid: bool,
     raw_unoptimized: bool,
     max_dim: u32,
-) -> Result<(u32, u32)> {
-    if raw_unoptimized && !enable_grid {
-        let dyn_img = image::open(image_path).map_err(|e| {
-            windows::core::Error::new(windows::core::HRESULT(-1), format!("Failed to read captured image: {}", e))
-        })?;
-        return Ok(dyn_img.dimensions());
-    }
-
+) -> Result<(u32, u32, u32, u32)> {
     let dyn_img = image::open(image_path).map_err(|e| {
         windows::core::Error::new(windows::core::HRESULT(-1), format!("Failed to read captured image: {}", e))
     })?;
+    let (orig_w, orig_h) = dyn_img.dimensions();
 
     let processed = if !raw_unoptimized {
         image_opt::optimize_for_vit_tiles(&dyn_img, max_dim)
@@ -920,11 +953,33 @@ fn post_process_and_save_image(
         processed
     };
 
+    let (final_w, final_h) = final_img.dimensions();
+
     final_img.save(image_path).map_err(|e| {
         windows::core::Error::new(windows::core::HRESULT(-1), format!("Failed to save processed image: {}", e))
     })?;
 
-    Ok(final_img.dimensions())
+    // Write sidecar metadata
+    let meta = serde_json::json!({
+        "image_path": image_path.to_string_lossy(),
+        "original_w": orig_w,
+        "original_h": orig_h,
+        "final_w": final_w,
+        "final_h": final_h,
+        "scale_x": final_w as f64 / orig_w.max(1) as f64,
+        "scale_y": final_h as f64 / orig_h.max(1) as f64,
+        "grid_enabled": enable_grid,
+        "raw_unoptimized": raw_unoptimized
+    });
+
+    let _ = fs::write(image_path.with_extension("meta.json"), serde_json::to_string_pretty(&meta).unwrap_or_default());
+    if let Ok(cur) = env::current_dir() {
+        let scratch_dir = cur.join("scratch");
+        let _ = fs::create_dir_all(&scratch_dir);
+        let _ = fs::write(scratch_dir.join(".last_capture.json"), serde_json::to_string_pretty(&meta).unwrap_or_default());
+    }
+
+    Ok((orig_w, orig_h, final_w, final_h))
 }
 
 fn capture_single_raw_frame(
@@ -1019,6 +1074,11 @@ fn ensure_parent_dir(path: &Path) {
 }
 
 fn main() {
+    unsafe {
+        use windows::Win32::UI::HiDpi::{SetProcessDpiAwarenessContext, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2};
+        let _ = SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+    }
+
     let options = match parse_cli_args() {
         Ok(opts) => opts,
         Err(err) => {
@@ -1073,18 +1133,20 @@ fn main() {
                 let screen_w = unsafe { GetSystemMetrics(SM_CXSCREEN) } as u32;
                 let screen_h = unsafe { GetSystemMetrics(SM_CYSCREEN) } as u32;
                 let _ = capture_single_raw_frame(&TargetMode::FullScreen, None, &abs_out_path, options.no_border);
-                let (final_w, final_h) = post_process_and_save_image(
+                let (raw_w, raw_h, final_w, final_h) = post_process_and_save_image(
                     &abs_out_path,
                     options.enable_grid,
                     options.raw_unoptimized,
                     options.max_dim,
-                ).unwrap_or((screen_w, screen_h));
+                ).unwrap_or((screen_w, screen_h, screen_w, screen_h));
 
                 print_agent_stdout(&format!(
-                    "[TYPE_SUCCESS]\ntext: {}\ntarget_window: {}\npost_state_image: {}\nresolution: {}x{}",
+                    "[TYPE_SUCCESS]\ntext: {}\ntarget_window: {}\npost_state_image: {}\noriginal_resolution: {}x{}\nsaved_resolution: {}x{}",
                     type_text,
                     target_win_for_action.map(|w| format!("pid={}|title={}", w.pid, w.title)).unwrap_or_else(|| "none".to_string()),
                     abs_out_path.display(),
+                    raw_w,
+                    raw_h,
                     final_w,
                     final_h
                 ));
@@ -1101,48 +1163,126 @@ fn main() {
         let screen_w = unsafe { GetSystemMetrics(SM_CXSCREEN) } as u32;
         let screen_h = unsafe { GetSystemMetrics(SM_CYSCREEN) } as u32;
 
-        let (target_x, target_y) = if click_target.contains(',') {
-            let pts: Vec<&str> = click_target.split(',').collect();
-            let x: u32 = pts[0].trim().parse().map_err(|_| "Invalid X coordinate")
-                .unwrap_or_else(|e| { print_agent_stderr(e); std::process::exit(1); });
-            let y: u32 = pts[1].trim().parse().map_err(|_| "Invalid Y coordinate")
-                .unwrap_or_else(|e| { print_agent_stderr(e); std::process::exit(1); });
-            (x, y)
+        let hwnd_opt = target_win_for_action.as_ref().map(|w| w.hwnd);
+
+        // Determine canvas dimensions for the target (window client rect if window targeted, else full screen)
+        let (canvas_w, canvas_h) = if let Some(ref win) = target_win_for_action {
+            rpa::get_window_client_dimensions(win.hwnd).unwrap_or((screen_w, screen_h))
         } else {
-            match image_opt::resolve_grid_coordinate(click_target, screen_w, screen_h) {
+            (screen_w, screen_h)
+        };
+
+        let mut auto_scale_applied = false;
+        let mut scale_detail = String::new();
+
+        let (physical_x, physical_y, target_log) = if click_target.contains(',') {
+            // Coordinate mode: x,y
+            let pts: Vec<&str> = click_target.split(',').collect();
+            let input_x: f64 = pts[0].trim().parse().map_err(|_| "Invalid X coordinate")
+                .unwrap_or_else(|e| { print_agent_stderr(e); std::process::exit(1); });
+            let input_y: f64 = pts[1].trim().parse().map_err(|_| "Invalid Y coordinate")
+                .unwrap_or_else(|e| { print_agent_stderr(e); std::process::exit(1); });
+
+            // Check if source scale resolution was specified or should be auto-detected
+            let mut src_scale: Option<(f64, f64)> = None;
+            if let Some((sw, sh)) = options.scale_from {
+                src_scale = Some((sw as f64, sh as f64));
+            } else if let Some(ref img_path) = options.from_image {
+                if let Ok(img) = image::open(img_path) {
+                    let (iw, ih) = img.dimensions();
+                    src_scale = Some((iw as f64, ih as f64));
+                }
+            } else if options.auto_scale {
+                let cur = env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+                let last_cap = cur.join("scratch").join(".last_capture.json");
+                let meta_path = abs_out_path.with_extension("meta.json");
+                let file_to_read = if meta_path.exists() {
+                    Some(meta_path)
+                } else if last_cap.exists() {
+                    Some(last_cap)
+                } else {
+                    None
+                };
+                if let Some(p) = file_to_read {
+                    if let Ok(content) = fs::read_to_string(p) {
+                        if let Ok(val) = serde_json::from_str::<serde_json::Value>(&content) {
+                            if let (Some(fw), Some(fh)) = (val["final_w"].as_f64(), val["final_h"].as_f64()) {
+                                if fw > 0.0 && fh > 0.0 {
+                                    src_scale = Some((fw, fh));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            if let Some((sw, sh)) = src_scale {
+                auto_scale_applied = true;
+                let mapped_x = ((input_x / sw) * canvas_w as f64).round() as i32;
+                let mapped_y = ((input_y / sh) * canvas_h as f64).round() as i32;
+                scale_detail = format!("canvas_scale: input ({},{}) on source {}x{} -> target {}x{} => ({},{})",
+                    input_x, input_y, sw, sh, canvas_w, canvas_h, mapped_x, mapped_y);
+
+                if let Some(ref win) = target_win_for_action {
+                    let mut pt = POINT { x: mapped_x, y: mapped_y };
+                    unsafe {
+                        let _ = windows::Win32::Graphics::Gdi::ClientToScreen(win.hwnd, &mut pt);
+                    }
+                    (pt.x, pt.y, format!("{},{} [client: {},{}]", pt.x, pt.y, mapped_x, mapped_y))
+                } else {
+                    (mapped_x, mapped_y, format!("{},{}", mapped_x, mapped_y))
+                }
+            } else {
+                // Direct physical/client coordinates (1:1)
+                if let Some(ref win) = target_win_for_action {
+                    let mut pt = POINT { x: input_x as i32, y: input_y as i32 };
+                    unsafe {
+                        let _ = windows::Win32::Graphics::Gdi::ClientToScreen(win.hwnd, &mut pt);
+                    }
+                    (pt.x, pt.y, format!("{},{} [client: {},{}]", pt.x, pt.y, input_x as i32, input_y as i32))
+                } else {
+                    (input_x as i32, input_y as i32, format!("{},{}", input_x as i32, input_y as i32))
+                }
+            }
+        } else {
+            // Hierarchical Grid mode (e.g. "B3-5")
+            let (rel_x, rel_y) = match image_opt::resolve_grid_coordinate(click_target, canvas_w, canvas_h) {
                 Ok(pt) => pt,
                 Err(err) => {
                     print_agent_stderr(&format!("[CLICK_ERROR]\nerror: invalid_grid_coordinate\ndetail: {}", err));
                     std::process::exit(1);
                 }
+            };
+
+            auto_scale_applied = true;
+            scale_detail = format!("grid_resolved: target {} on canvas {}x{} => relative ({},{})",
+                click_target, canvas_w, canvas_h, rel_x, rel_y);
+
+            if let Some(ref win) = target_win_for_action {
+                let mut pt = POINT { x: rel_x as i32, y: rel_y as i32 };
+                unsafe {
+                    let _ = windows::Win32::Graphics::Gdi::ClientToScreen(win.hwnd, &mut pt);
+                }
+                (pt.x, pt.y, format!("{},{} [client: {},{}]", pt.x, pt.y, rel_x, rel_y))
+            } else {
+                (rel_x as i32, rel_y as i32, format!("{},{}", rel_x, rel_y))
             }
         };
 
-        let hwnd_opt = target_win_for_action.as_ref().map(|w| w.hwnd);
-        let (physical_x, physical_y) = if let Some(ref win) = target_win_for_action {
-            let mut pt = windows::Win32::Foundation::POINT { x: target_x as i32, y: target_y as i32 };
-            unsafe {
-                let _ = windows::Win32::Graphics::Gdi::ClientToScreen(win.hwnd, &mut pt);
-            }
-            (pt.x, pt.y)
-        } else {
-            (target_x as i32, target_y as i32)
-        };
-
-        match rpa::execute_deterministic_click(physical_x, physical_y, hwnd_opt) {
+        match rpa::execute_deterministic_click(physical_x, physical_y, hwnd_opt, options.double_click) {
             Ok(()) => {
                 // Post-action verification frame
                 let _ = capture_single_raw_frame(&TargetMode::FullScreen, None, &abs_out_path, options.no_border);
-                let (final_w, final_h) = post_process_and_save_image(
+                let (raw_w, raw_h, final_w, final_h) = post_process_and_save_image(
                     &abs_out_path,
                     options.enable_grid,
                     options.raw_unoptimized,
                     options.max_dim,
-                ).unwrap_or((screen_w, screen_h));
+                ).unwrap_or((screen_w, screen_h, screen_w, screen_h));
 
                 print_agent_stdout(&format!(
-                    "[CLICK_SUCCESS]\ntarget: {}\nphysical_point: {},{}\npost_state_image: {}\nresolution: {}x{}",
-                    click_target, target_x, target_y, abs_out_path.display(), final_w, final_h
+                    "[CLICK_SUCCESS]\ntarget: {}\nphysical_point: {}\nauto_scale: {}\nscale_info: {}\ndouble_click: {}\npost_state_image: {}\noriginal_resolution: {}x{}\nsaved_resolution: {}x{}",
+                    click_target, target_log, auto_scale_applied, if scale_detail.is_empty() { "none" } else { &scale_detail }, options.double_click, abs_out_path.display(), raw_w, raw_h, final_w, final_h
                 ));
                 std::process::exit(0);
             }
@@ -1158,16 +1298,19 @@ fn main() {
         println!("啟動 Windows 剪取工具 (ms-screenclip:)... 請在螢幕上框選目標區域：");
         match capture_interactive_snip(&abs_out_path, options.timeout_secs) {
             Ok((w, h)) => {
-                let (final_w, final_h) = post_process_and_save_image(
+                let (raw_w, raw_h, final_w, final_h) = post_process_and_save_image(
                     &abs_out_path,
                     options.enable_grid,
                     options.raw_unoptimized,
                     options.max_dim,
-                ).unwrap_or((w, h));
+                ).unwrap_or((w, h, w, h));
 
                 print_agent_stdout(&format!(
-                    "[CAPTURED_IMAGE]\nstatus: success\nmode: interactive_snip\nresolution: {}x{}\npath: {}",
-                    final_w, final_h, abs_out_path.display()
+                    "[CAPTURED_IMAGE]\nstatus: success\nmode: interactive_snip\noriginal_resolution: {}x{}\nsaved_resolution: {}x{}\nscale_ratio: {:.4},{:.4}\npath: {}",
+                    raw_w, raw_h, final_w, final_h,
+                    final_w as f64 / raw_w.max(1) as f64,
+                    final_h as f64 / raw_h.max(1) as f64,
+                    abs_out_path.display()
                 ));
                 std::process::exit(0);
             }
@@ -1227,18 +1370,22 @@ fn main() {
                 }
             };
 
-            let (final_w, final_h) = post_process_and_save_image(
+            let (raw_w, raw_h, final_w, final_h) = post_process_and_save_image(
                 &abs_out_path,
                 options.enable_grid,
                 options.raw_unoptimized,
                 options.max_dim,
-            ).unwrap_or((raw_w, raw_h));
+            ).unwrap_or((raw_w, raw_h, raw_w, raw_h));
 
             print_agent_stdout(&format!(
-                "[CAPTURED_IMAGE]\nstatus: success\nmode: {}\nresolution: {}x{}\ntile_optimized: {}\ngrid_overlay: {}\npath: {}",
+                "[CAPTURED_IMAGE]\nstatus: success\nmode: {}\noriginal_resolution: {}x{}\nsaved_resolution: {}x{}\nscale_ratio: {:.4},{:.4}\ntile_optimized: {}\ngrid_overlay: {}\npath: {}",
                 mode_used,
+                raw_w,
+                raw_h,
                 final_w,
                 final_h,
+                final_w as f64 / raw_w.max(1) as f64,
+                final_h as f64 / raw_h.max(1) as f64,
                 !options.raw_unoptimized,
                 options.enable_grid,
                 abs_out_path.display()
@@ -1304,22 +1451,26 @@ fn main() {
                 }
             };
 
-            let (final_w, final_h) = post_process_and_save_image(
+            let (raw_w, raw_h, final_w, final_h) = post_process_and_save_image(
                 &abs_out_path,
                 options.enable_grid,
                 options.raw_unoptimized,
                 options.max_dim,
-            ).unwrap_or((raw_w, raw_h));
+            ).unwrap_or((raw_w, raw_h, raw_w, raw_h));
 
             print_agent_stdout(&format!(
-                "[CAPTURED_IMAGE]\nstatus: success\nmode: {}\ntarget_pid: {}\ntarget_process: {}\ntarget_title: {}\nvirtual_desktop: {}\nresolution: {}x{}\ntile_optimized: {}\ngrid_overlay: {}\npath: {}",
+                "[CAPTURED_IMAGE]\nstatus: success\nmode: {}\ntarget_pid: {}\ntarget_process: {}\ntarget_title: {}\nvirtual_desktop: {}\noriginal_resolution: {}x{}\nsaved_resolution: {}x{}\nscale_ratio: {:.4},{:.4}\ntile_optimized: {}\ngrid_overlay: {}\npath: {}",
                 mode_used,
                 target_win.pid,
                 target_win.process_name,
                 target_win.title,
                 target_win.is_virtual_desktop,
+                raw_w,
+                raw_h,
                 final_w,
                 final_h,
+                final_w as f64 / raw_w.max(1) as f64,
+                final_h as f64 / raw_h.max(1) as f64,
                 !options.raw_unoptimized,
                 options.enable_grid,
                 abs_out_path.display()
