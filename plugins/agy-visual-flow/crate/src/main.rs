@@ -79,10 +79,12 @@ enum TargetMode {
     ListWindows,
     InteractiveSnip,
     Click(String), // target grid coordinate (e.g. "B3-5") or "x,y"
+    Type(String),  // text to type into active/target window
 }
 
 struct CliOptions {
     target: TargetMode,
+    window_filter: Option<String>,
     output_path: PathBuf,
     no_border: bool,
     timeout_secs: u64,
@@ -412,6 +414,9 @@ fn capture_interactive_snip(out_path: &Path, timeout_secs: u64) -> Result<(u32, 
 fn parse_cli_args() -> std::result::Result<CliOptions, String> {
     let args: Vec<String> = env::args().collect();
     let mut target = None;
+    let mut window_filter = None;
+    let mut click_param = None;
+    let mut type_param = None;
     let mut output_path = None;
     let mut no_border = true;
     let mut timeout_secs = 180u64;
@@ -428,6 +433,7 @@ fn parse_cli_args() -> std::result::Result<CliOptions, String> {
                 if i >= args.len() {
                     return Err(String::from("Missing value for --name"));
                 }
+                window_filter = Some(args[i].clone());
                 target = Some(TargetMode::ByProcessName(args[i].clone()));
             }
             "--title" | "-WindowTitle" => {
@@ -435,6 +441,7 @@ fn parse_cli_args() -> std::result::Result<CliOptions, String> {
                 if i >= args.len() {
                     return Err(String::from("Missing value for --title"));
                 }
+                window_filter = Some(args[i].clone());
                 target = Some(TargetMode::ByTitle(args[i].clone()));
             }
             "--pid" | "-Id" | "-PID" => {
@@ -443,14 +450,29 @@ fn parse_cli_args() -> std::result::Result<CliOptions, String> {
                     return Err(String::from("Missing value for --pid"));
                 }
                 let pid = args[i].parse::<u32>().map_err(|_| format!("Invalid PID: {}", args[i]))?;
+                window_filter = Some(args[i].clone());
                 target = Some(TargetMode::ByPid(pid));
+            }
+            "--window" => {
+                i += 1;
+                if i >= args.len() {
+                    return Err(String::from("Missing value for --window"));
+                }
+                window_filter = Some(args[i].clone());
             }
             "--click" => {
                 i += 1;
                 if i >= args.len() {
                     return Err(String::from("Missing value for --click"));
                 }
-                target = Some(TargetMode::Click(args[i].clone()));
+                click_param = Some(args[i].clone());
+            }
+            "--type" => {
+                i += 1;
+                if i >= args.len() {
+                    return Err(String::from("Missing value for --type"));
+                }
+                type_param = Some(args[i].clone());
             }
             "--grid" => {
                 enable_grid = true;
@@ -515,7 +537,14 @@ fn parse_cli_args() -> std::result::Result<CliOptions, String> {
         i += 1;
     }
 
-    let target = target.unwrap_or(TargetMode::FullScreen);
+    let target = if let Some(text) = type_param {
+        TargetMode::Type(text)
+    } else if let Some(click_coord) = click_param {
+        TargetMode::Click(click_coord)
+    } else {
+        target.unwrap_or(TargetMode::FullScreen)
+    };
+
     let out = output_path.unwrap_or_else(|| {
         if matches!(target, TargetMode::InteractiveSnip) {
             let timestamp = std::time::SystemTime::now()
@@ -523,8 +552,8 @@ fn parse_cli_args() -> std::result::Result<CliOptions, String> {
                 .unwrap_or_default()
                 .as_secs();
             PathBuf::from(format!("scratch/snip_{}.png", timestamp))
-        } else if matches!(target, TargetMode::Click(_)) {
-            PathBuf::from("scratch/click_result.png")
+        } else if matches!(target, TargetMode::Click(_)) || matches!(target, TargetMode::Type(_)) {
+            PathBuf::from("scratch/action_result.png")
         } else if storyboard_secs.is_some() {
             PathBuf::from("scratch/storyboard.png")
         } else {
@@ -534,6 +563,7 @@ fn parse_cli_args() -> std::result::Result<CliOptions, String> {
 
     Ok(CliOptions {
         target,
+        window_filter,
         output_path: out,
         no_border,
         timeout_secs,
@@ -1019,8 +1049,55 @@ fn main() {
         }
     };
 
+    let target_win_for_action = if let Some(ref filter) = options.window_filter {
+        let all = collect_all_windows();
+        if let Ok(pid) = filter.parse::<u32>() {
+            all.into_iter().find(|w| w.pid == pid)
+        } else if filter.starts_with("0x") || filter.starts_with("0X") {
+            if let Ok(hwnd_val) = usize::from_str_radix(&filter[2..], 16) {
+                all.into_iter().find(|w| w.hwnd == HWND(hwnd_val as *mut std::ffi::c_void))
+            } else {
+                all.into_iter().find(|w| w.title.to_lowercase().contains(&filter.to_lowercase()) || w.process_name.to_lowercase().contains(&filter.to_lowercase()))
+            }
+        } else {
+            all.into_iter().find(|w| w.title.to_lowercase().contains(&filter.to_lowercase()) || w.process_name.to_lowercase().contains(&filter.to_lowercase()))
+        }
+    } else {
+        None
+    };
+
+    if let TargetMode::Type(ref type_text) = options.target {
+        let hwnd_opt = target_win_for_action.as_ref().map(|w| w.hwnd);
+        match rpa::execute_deterministic_type(type_text, hwnd_opt) {
+            Ok(()) => {
+                let screen_w = unsafe { GetSystemMetrics(SM_CXSCREEN) } as u32;
+                let screen_h = unsafe { GetSystemMetrics(SM_CYSCREEN) } as u32;
+                let _ = capture_single_raw_frame(&TargetMode::FullScreen, None, &abs_out_path, options.no_border);
+                let (final_w, final_h) = post_process_and_save_image(
+                    &abs_out_path,
+                    options.enable_grid,
+                    options.raw_unoptimized,
+                    options.max_dim,
+                ).unwrap_or((screen_w, screen_h));
+
+                print_agent_stdout(&format!(
+                    "[TYPE_SUCCESS]\ntext: {}\ntarget_window: {}\npost_state_image: {}\nresolution: {}x{}",
+                    type_text,
+                    target_win_for_action.map(|w| format!("pid={}|title={}", w.pid, w.title)).unwrap_or_else(|| "none".to_string()),
+                    abs_out_path.display(),
+                    final_w,
+                    final_h
+                ));
+                std::process::exit(0);
+            }
+            Err(err) => {
+                print_agent_stderr(&format!("[TYPE_ERROR]\nerror: type_execution_failed\ndetail: {}", err));
+                std::process::exit(1);
+            }
+        }
+    }
+
     if let TargetMode::Click(ref click_target) = options.target {
-        // Resolve click target: either "B3-5" grid coordinate or "x,y" physical coordinate
         let screen_w = unsafe { GetSystemMetrics(SM_CXSCREEN) } as u32;
         let screen_h = unsafe { GetSystemMetrics(SM_CYSCREEN) } as u32;
 
@@ -1041,7 +1118,8 @@ fn main() {
             }
         };
 
-        match rpa::execute_deterministic_click(target_x as i32, target_y as i32, None) {
+        let hwnd_opt = target_win_for_action.as_ref().map(|w| w.hwnd);
+        match rpa::execute_deterministic_click(target_x as i32, target_y as i32, hwnd_opt) {
             Ok(()) => {
                 // Post-action verification frame
                 let _ = capture_single_raw_frame(&TargetMode::FullScreen, None, &abs_out_path, options.no_border);
