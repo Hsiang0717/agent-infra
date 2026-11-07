@@ -1119,7 +1119,17 @@ fn main() {
         };
 
         let hwnd_opt = target_win_for_action.as_ref().map(|w| w.hwnd);
-        match rpa::execute_deterministic_click(target_x as i32, target_y as i32, hwnd_opt) {
+        let (physical_x, physical_y) = if let Some(ref win) = target_win_for_action {
+            let mut pt = windows::Win32::Foundation::POINT { x: target_x as i32, y: target_y as i32 };
+            unsafe {
+                let _ = windows::Win32::Graphics::Gdi::ClientToScreen(win.hwnd, &mut pt);
+            }
+            (pt.x, pt.y)
+        } else {
+            (target_x as i32, target_y as i32)
+        };
+
+        match rpa::execute_deterministic_click(physical_x, physical_y, hwnd_opt) {
             Ok(()) => {
                 // Post-action verification frame
                 let _ = capture_single_raw_frame(&TargetMode::FullScreen, None, &abs_out_path, options.no_border);
