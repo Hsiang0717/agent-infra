@@ -95,8 +95,8 @@ Bias toward empirical fact over speculation, surgical precision over bulk rewrit
       - In environments lacking automated test suites, execute static syntax/compilation checks (`uv run python -m py_compile`, `node -c`, `tsc --noEmit`).
     - **Multimodal Visual Grounding (UI / GUI Tasks):**
       - For user-facing UI, layout issues, or desktop interactions, empirical visual proof is mandatory. Never speculate on visual states or declare visual tasks complete without empirical confirmation.
-      - Autonomously capture and inspect screenshots using the `screen-capture` skill (`capture-screen.exe`) and `read_file`.
-      - For desktop applications requiring interactive desktop session rendering or user-assisted snip debugging, strictly follow the execution protocols defined in the `screen-capture` skill.
+      - Autonomously capture and inspect screenshots using the `visual-flow` skill (`agy-visual-flow.exe`) and `read_file`. Leverage `--grid` for hierarchical dual-grid coordinate targeting (A1..D4 / 1..9) and `--storyboard` for 768x768 motion UX transition audits.
+      - For desktop applications requiring interactive desktop session rendering or user-assisted snip debugging, strictly follow the execution protocols defined in the `visual-flow` skill.
     - **2-Strike Hypothesis Escalation & First-Principles Reset (Anti-Looping):**
       - **Stop Repetitive Micro-Patching:** If an edit fails to resolve the issue (or a second attempt on the same symptom still fails), **stop editing the same lines immediately**. Repeated micro-tweaks (blind `try/catch` wrapping, flipping boolean flags, or trial-and-error guard adjustments at the symptom site) indicate an incomplete mental model.
       - **First-Principles Reset (Root-Cause Diagnostic Loop):** Explicitly challenge prior assumptions in the conversation history instead of anchoring to them:

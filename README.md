@@ -24,7 +24,7 @@ license: MIT
   * [agy-handoff](plugins/agy-handoff/): Rust 原生開發的高密度 Session 軌跡交接外掛，自動打包當前上下文並寫入系統剪貼簿。
   * [git-agent-flow](plugins/git-agent-flow/): AAEP 原生輕量化 Conventional Commit 與分支保護工作流外掛，強制 main 主幹保護、專案風格自適應探測、非交互式歷史整頓與 `/smart-commit` 原生 Git 意圖聚類提交。
   * [harness-optimizer](plugins/harness-optimizer/): 遞迴式程式碼、演算法、Prompt 與評估 Harness 優化外掛（靈感源自 Google Research Harness2），具備前置審計防呆門禁、黑箱資料集隔離、複合損失函數、語意梯度突變與雙層 Subagent Context 防火牆隔離訓練架構。
-  * [screen-capture](plugins/screen-capture/): Rust + Windows Graphics Capture (WGC) 原生高解析螢幕與視窗擷取工具，專供 Agent 進行多模態 UI 視覺驗證閉環。
+  * [agy-visual-flow](plugins/agy-visual-flow/): AI-Native 多模態視覺感知與確定性 RPA 工具（支援 ViT Tile 最佳化縮放、雙層網格 A1..D4 / 1..9、768x768 時序膠卷與零延遲物理擊發），專供 Agent 進行 UI/UX 驗證閉環。
 * **[profile/](profile/)**: Agent-Native CLI 工具鏈與 PowerShell Profile 擴充。
   * [README.md](profile/README.md): 外部相依清單（winget）、原生 CLI 分工矩陣與 Helper 說明。
   * 提供 `AgentHelpers.ps1` 與模組化包裝（`.psd1` / `.psm1`），支援宣告式 Dot-source 引用與標準 PowerShell 模組 Auto-loading 雙安裝架構。

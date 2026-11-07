@@ -5,6 +5,8 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc::channel;
 use std::time::Duration;
 
+use image::GenericImageView;
+
 use windows::core::{factory, s, BOOL, Interface, Result, PWSTR};
 use windows::Foundation::TypedEventHandler;
 use windows::Graphics::Capture::{Direct3D11CaptureFramePool, GraphicsCaptureItem};
@@ -65,6 +67,9 @@ struct WindowInfo {
     is_virtual_desktop: bool,
 }
 
+mod image_opt;
+mod rpa;
+
 #[derive(Debug, Clone)]
 enum TargetMode {
     ByProcessName(String),
@@ -73,6 +78,7 @@ enum TargetMode {
     FullScreen,
     ListWindows,
     InteractiveSnip,
+    Click(String), // target grid coordinate (e.g. "B3-5") or "x,y"
 }
 
 struct CliOptions {
@@ -80,6 +86,10 @@ struct CliOptions {
     output_path: PathBuf,
     no_border: bool,
     timeout_secs: u64,
+    enable_grid: bool,
+    raw_unoptimized: bool,
+    max_dim: u32,
+    storyboard_secs: Option<u64>,
 }
 
 struct ConsoleGuard(HWND);
@@ -405,6 +415,10 @@ fn parse_cli_args() -> std::result::Result<CliOptions, String> {
     let mut output_path = None;
     let mut no_border = true;
     let mut timeout_secs = 180u64;
+    let mut enable_grid = false;
+    let mut raw_unoptimized = false;
+    let mut max_dim = image_opt::DEFAULT_MAX_DIMENSION;
+    let mut storyboard_secs = None;
 
     let mut i = 1;
     while i < args.len() {
@@ -430,6 +444,35 @@ fn parse_cli_args() -> std::result::Result<CliOptions, String> {
                 }
                 let pid = args[i].parse::<u32>().map_err(|_| format!("Invalid PID: {}", args[i]))?;
                 target = Some(TargetMode::ByPid(pid));
+            }
+            "--click" => {
+                i += 1;
+                if i >= args.len() {
+                    return Err(String::from("Missing value for --click"));
+                }
+                target = Some(TargetMode::Click(args[i].clone()));
+            }
+            "--grid" => {
+                enable_grid = true;
+            }
+            "--raw" => {
+                raw_unoptimized = true;
+            }
+            "--max-dim" => {
+                i += 1;
+                if i >= args.len() {
+                    return Err(String::from("Missing value for --max-dim"));
+                }
+                max_dim = args[i].parse::<u32>().map_err(|_| format!("Invalid max-dim: {}", args[i]))?;
+            }
+            "--storyboard" => {
+                let secs = if i + 1 < args.len() && !args[i + 1].starts_with('-') {
+                    i += 1;
+                    args[i].parse::<u64>().unwrap_or(2)
+                } else {
+                    2
+                };
+                storyboard_secs = Some(secs.max(1).min(10));
             }
             "--fullscreen" | "-FullScreen" => {
                 target = Some(TargetMode::FullScreen);
@@ -462,7 +505,7 @@ fn parse_cli_args() -> std::result::Result<CliOptions, String> {
             }
             "-h" | "--help" => {
                 return Err(String::from(
-                    "Usage: capture-screen.exe [--name <process>] [--title <title>] [--pid <id>] [--fullscreen] [--snip] [--timeout <sec>] [--list] [--out <path>] [--no-border]"
+                    "Usage: agy-visual-flow.exe [--name <process>] [--title <title>] [--pid <id>] [--fullscreen] [--snip] [--click <grid|x,y>] [--grid] [--storyboard [sec]] [--raw] [--max-dim <px>] [--timeout <sec>] [--list] [--out <path>]"
                 ));
             }
             other => {
@@ -479,13 +522,13 @@ fn parse_cli_args() -> std::result::Result<CliOptions, String> {
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap_or_default()
                 .as_secs();
-            if Path::new("scratch").exists() {
-                PathBuf::from(format!("scratch/user_snip_{}.png", timestamp))
-            } else {
-                PathBuf::from(format!("user_snip_{}.png", timestamp))
-            }
+            PathBuf::from(format!("scratch/snip_{}.png", timestamp))
+        } else if matches!(target, TargetMode::Click(_)) {
+            PathBuf::from("scratch/click_result.png")
+        } else if storyboard_secs.is_some() {
+            PathBuf::from("scratch/storyboard.png")
         } else {
-            PathBuf::from("screenshot.png")
+            PathBuf::from("scratch/screen.png")
         }
     });
 
@@ -494,6 +537,10 @@ fn parse_cli_args() -> std::result::Result<CliOptions, String> {
         output_path: out,
         no_border,
         timeout_secs,
+        enable_grid,
+        raw_unoptimized,
+        max_dim,
+        storyboard_secs,
     })
 }
 
@@ -814,6 +861,125 @@ fn capture_gdi_screen(out_path: &Path) -> Result<(u32, u32)> {
     }
 }
 
+fn post_process_and_save_image(
+    image_path: &Path,
+    enable_grid: bool,
+    raw_unoptimized: bool,
+    max_dim: u32,
+) -> Result<(u32, u32)> {
+    if raw_unoptimized && !enable_grid {
+        let dyn_img = image::open(image_path).map_err(|e| {
+            windows::core::Error::new(windows::core::HRESULT(-1), format!("Failed to read captured image: {}", e))
+        })?;
+        return Ok(dyn_img.dimensions());
+    }
+
+    let dyn_img = image::open(image_path).map_err(|e| {
+        windows::core::Error::new(windows::core::HRESULT(-1), format!("Failed to read captured image: {}", e))
+    })?;
+
+    let processed = if !raw_unoptimized {
+        image_opt::optimize_for_vit_tiles(&dyn_img, max_dim)
+    } else {
+        dyn_img
+    };
+
+    let final_img = if enable_grid {
+        image_opt::overlay_hierarchical_grid(&processed)
+    } else {
+        processed
+    };
+
+    final_img.save(image_path).map_err(|e| {
+        windows::core::Error::new(windows::core::HRESULT(-1), format!("Failed to save processed image: {}", e))
+    })?;
+
+    Ok(final_img.dimensions())
+}
+
+fn capture_single_raw_frame(
+    target: &TargetMode,
+    target_win: Option<&WindowInfo>,
+    out_path: &Path,
+    no_border: bool,
+) -> Result<(u32, u32, &'static str)> {
+    match target {
+        TargetMode::FullScreen | TargetMode::Click(_) => {
+            let hmonitor = unsafe {
+                let pt = POINT { x: 0, y: 0 };
+                MonitorFromPoint(pt, MONITOR_DEFAULTTOPRIMARY)
+            };
+
+            if let Ok(interop) = factory::<GraphicsCaptureItem, IGraphicsCaptureItemInterop>() {
+                if let Ok(item) = unsafe { interop.CreateForMonitor(hmonitor) } {
+                    if let Ok((w, h)) = capture_wgc(&item, out_path, no_border) {
+                        return Ok((w, h, "fullscreen_wgc"));
+                    }
+                }
+            }
+
+            let (w, h) = capture_gdi_screen(out_path)?;
+            Ok((w, h, "fullscreen_gdi"))
+        }
+        _ => {
+            let win = target_win.ok_or_else(|| {
+                windows::core::Error::new(windows::core::HRESULT(-1), "Missing target window reference")
+            })?;
+
+            if let Ok(interop) = factory::<GraphicsCaptureItem, IGraphicsCaptureItemInterop>() {
+                if let Ok(item) = unsafe { interop.CreateForWindow(win.hwnd) } {
+                    if let Ok((w, h)) = capture_wgc(&item, out_path, no_border) {
+                        return Ok((w, h, "window_wgc"));
+                    }
+                }
+            }
+
+            let (w, h) = capture_gdi_window(win.hwnd, out_path)?;
+            Ok((w, h, "window_gdi"))
+        }
+    }
+}
+
+fn run_storyboard_capture(
+    target: &TargetMode,
+    target_win: Option<&WindowInfo>,
+    out_path: &Path,
+    no_border: bool,
+    duration_secs: u64,
+) -> Result<(u32, u32)> {
+    let num_frames = 4usize;
+    let interval = Duration::from_millis((duration_secs * 1000) / (num_frames as u64));
+    let mut frames = Vec::new();
+    let temp_dir = env::temp_dir();
+
+    for i in 0..num_frames {
+        let temp_frame_path = temp_dir.join(format!("agy_vf_frame_{}_{}.png", std::process::id(), i));
+        let _ = capture_single_raw_frame(target, target_win, &temp_frame_path, no_border)?;
+        if let Ok(img) = image::open(&temp_frame_path) {
+            frames.push(img);
+        }
+        let _ = fs::remove_file(&temp_frame_path);
+
+        if i + 1 < num_frames {
+            std::thread::sleep(interval);
+        }
+    }
+
+    if frames.is_empty() {
+        return Err(windows::core::Error::new(
+            windows::core::HRESULT(-1),
+            "Failed to capture any frames for storyboard",
+        ));
+    }
+
+    let storyboard = image_opt::compose_storyboard_768(&frames);
+    storyboard.save(out_path).map_err(|e| {
+        windows::core::Error::new(windows::core::HRESULT(-1), format!("Failed to save storyboard: {}", e))
+    })?;
+
+    Ok(storyboard.dimensions())
+}
+
 fn ensure_parent_dir(path: &Path) {
     if let Some(parent) = path.parent() {
         if !parent.as_os_str().is_empty() && !parent.exists() {
@@ -853,14 +1019,67 @@ fn main() {
         }
     };
 
+    if let TargetMode::Click(ref click_target) = options.target {
+        // Resolve click target: either "B3-5" grid coordinate or "x,y" physical coordinate
+        let screen_w = unsafe { GetSystemMetrics(SM_CXSCREEN) } as u32;
+        let screen_h = unsafe { GetSystemMetrics(SM_CYSCREEN) } as u32;
+
+        let (target_x, target_y) = if click_target.contains(',') {
+            let pts: Vec<&str> = click_target.split(',').collect();
+            let x: u32 = pts[0].trim().parse().map_err(|_| "Invalid X coordinate")
+                .unwrap_or_else(|e| { print_agent_stderr(e); std::process::exit(1); });
+            let y: u32 = pts[1].trim().parse().map_err(|_| "Invalid Y coordinate")
+                .unwrap_or_else(|e| { print_agent_stderr(e); std::process::exit(1); });
+            (x, y)
+        } else {
+            match image_opt::resolve_grid_coordinate(click_target, screen_w, screen_h) {
+                Ok(pt) => pt,
+                Err(err) => {
+                    print_agent_stderr(&format!("[CLICK_ERROR]\nerror: invalid_grid_coordinate\ndetail: {}", err));
+                    std::process::exit(1);
+                }
+            }
+        };
+
+        match rpa::execute_deterministic_click(target_x as i32, target_y as i32, None) {
+            Ok(()) => {
+                // Post-action verification frame
+                let _ = capture_single_raw_frame(&TargetMode::FullScreen, None, &abs_out_path, options.no_border);
+                let (final_w, final_h) = post_process_and_save_image(
+                    &abs_out_path,
+                    options.enable_grid,
+                    options.raw_unoptimized,
+                    options.max_dim,
+                ).unwrap_or((screen_w, screen_h));
+
+                print_agent_stdout(&format!(
+                    "[CLICK_SUCCESS]\ntarget: {}\nphysical_point: {},{}\npost_state_image: {}\nresolution: {}x{}",
+                    click_target, target_x, target_y, abs_out_path.display(), final_w, final_h
+                ));
+                std::process::exit(0);
+            }
+            Err(err) => {
+                print_agent_stderr(&format!("[CLICK_ERROR]\nerror: click_execution_failed\ndetail: {}", err));
+                std::process::exit(1);
+            }
+        }
+    }
+
     if let TargetMode::InteractiveSnip = options.target {
         ensure_parent_dir(&abs_out_path);
         println!("啟動 Windows 剪取工具 (ms-screenclip:)... 請在螢幕上框選目標區域：");
         match capture_interactive_snip(&abs_out_path, options.timeout_secs) {
             Ok((w, h)) => {
+                let (final_w, final_h) = post_process_and_save_image(
+                    &abs_out_path,
+                    options.enable_grid,
+                    options.raw_unoptimized,
+                    options.max_dim,
+                ).unwrap_or((w, h));
+
                 print_agent_stdout(&format!(
                     "[CAPTURED_IMAGE]\nstatus: success\nmode: interactive_snip\nresolution: {}x{}\npath: {}",
-                    w, h, abs_out_path.display()
+                    final_w, final_h, abs_out_path.display()
                 ));
                 std::process::exit(0);
             }
@@ -882,50 +1101,61 @@ fn main() {
     }
     let _guard = ConsoleGuard(console_hwnd);
 
-    match options.target {
-        TargetMode::FullScreen => {
-            let hmonitor = unsafe {
-                let pt = POINT { x: 0, y: 0 };
-                MonitorFromPoint(pt, MONITOR_DEFAULTTOPRIMARY)
-            };
-
-            let mut captured = false;
-            let mut res_w = 0;
-            let mut res_h = 0;
-            let mut mode_used = "fullscreen_wgc";
-
-            if let Ok(interop) = factory::<GraphicsCaptureItem, IGraphicsCaptureItemInterop>() {
-                if let Ok(item) = unsafe { interop.CreateForMonitor(hmonitor) } {
-                    if let Ok((w, h)) = capture_wgc(&item, &abs_out_path, options.no_border) {
-                        captured = true;
-                        res_w = w;
-                        res_h = h;
-                    }
-                }
-            }
-
-            if !captured {
-                if let Ok((w, h)) = capture_gdi_screen(&abs_out_path) {
-                    captured = true;
-                    res_w = w;
-                    res_h = h;
-                    mode_used = "fullscreen_gdi_fallback";
-                }
-            }
-
-            if captured {
-                print_agent_stdout(&format!(
-                    "[CAPTURED_IMAGE]\nstatus: success\nmode: {}\nresolution: {}x{}\npath: {}",
-                    mode_used,
-                    res_w,
-                    res_h,
-                    abs_out_path.display()
-                ));
-                std::process::exit(0);
-            } else {
-                print_agent_stderr("[CAPTURE_ERROR]\nerror: fullscreen_capture_failed");
+    // Check Storyboard Mode (2x2 grid 768x768 UX motion sequence)
+    if let Some(duration_secs) = options.storyboard_secs {
+        let (sb_w, sb_h) = match run_storyboard_capture(
+            &options.target,
+            None,
+            &abs_out_path,
+            options.no_border,
+            duration_secs,
+        ) {
+            Ok(dims) => dims,
+            Err(err) => {
+                print_agent_stderr(&format!("[STORYBOARD_ERROR]\nerror: storyboard_failed\ndetail: {}", err));
                 std::process::exit(1);
             }
+        };
+
+        print_agent_stdout(&format!(
+            "[STORYBOARD_IMAGE]\nstatus: success\nmode: storyboard_768\nduration: {}s\nresolution: {}x{}\npath: {}",
+            duration_secs, sb_w, sb_h, abs_out_path.display()
+        ));
+        std::process::exit(0);
+    }
+
+    match options.target {
+        TargetMode::FullScreen => {
+            let (raw_w, raw_h, mode_used) = match capture_single_raw_frame(
+                &TargetMode::FullScreen,
+                None,
+                &abs_out_path,
+                options.no_border,
+            ) {
+                Ok(res) => res,
+                Err(err) => {
+                    print_agent_stderr(&format!("[CAPTURE_ERROR]\nerror: fullscreen_capture_failed\ndetail: {}", err));
+                    std::process::exit(1);
+                }
+            };
+
+            let (final_w, final_h) = post_process_and_save_image(
+                &abs_out_path,
+                options.enable_grid,
+                options.raw_unoptimized,
+                options.max_dim,
+            ).unwrap_or((raw_w, raw_h));
+
+            print_agent_stdout(&format!(
+                "[CAPTURED_IMAGE]\nstatus: success\nmode: {}\nresolution: {}x{}\ntile_optimized: {}\ngrid_overlay: {}\npath: {}",
+                mode_used,
+                final_w,
+                final_h,
+                !options.raw_unoptimized,
+                options.enable_grid,
+                abs_out_path.display()
+            ));
+            std::process::exit(0);
         }
         ref specific_target => {
             let all_windows = collect_all_windows();
@@ -970,50 +1200,43 @@ fn main() {
                 }
             }
 
-            let mut captured = false;
-            let mut res_w = 0;
-            let mut res_h = 0;
-            let mut mode_used = "window_wgc";
-
-            if let Ok(interop) = factory::<GraphicsCaptureItem, IGraphicsCaptureItemInterop>() {
-                if let Ok(item) = unsafe { interop.CreateForWindow(target_win.hwnd) } {
-                    if let Ok((w, h)) = capture_wgc(&item, &abs_out_path, options.no_border) {
-                        captured = true;
-                        res_w = w;
-                        res_h = h;
-                    }
+            let (raw_w, raw_h, mode_used) = match capture_single_raw_frame(
+                specific_target,
+                Some(&target_win),
+                &abs_out_path,
+                options.no_border,
+            ) {
+                Ok(res) => res,
+                Err(err) => {
+                    print_agent_stderr(&format!(
+                        "[CAPTURE_ERROR]\nerror: window_capture_failed\ntarget_pid: {}\ntarget_process: {}\ndetail: {}",
+                        target_win.pid, target_win.process_name, err
+                    ));
+                    std::process::exit(1);
                 }
-            }
+            };
 
-            if !captured {
-                if let Ok((w, h)) = capture_gdi_window(target_win.hwnd, &abs_out_path) {
-                    captured = true;
-                    res_w = w;
-                    res_h = h;
-                    mode_used = "window_gdi_fallback";
-                }
-            }
+            let (final_w, final_h) = post_process_and_save_image(
+                &abs_out_path,
+                options.enable_grid,
+                options.raw_unoptimized,
+                options.max_dim,
+            ).unwrap_or((raw_w, raw_h));
 
-            if captured {
-                print_agent_stdout(&format!(
-                    "[CAPTURED_IMAGE]\nstatus: success\nmode: {}\ntarget_pid: {}\ntarget_process: {}\ntarget_title: {}\nvirtual_desktop: {}\nresolution: {}x{}\npath: {}",
-                    mode_used,
-                    target_win.pid,
-                    target_win.process_name,
-                    target_win.title,
-                    target_win.is_virtual_desktop,
-                    res_w,
-                    res_h,
-                    abs_out_path.display()
-                ));
-                std::process::exit(0);
-            } else {
-                print_agent_stderr(&format!(
-                    "[CAPTURE_ERROR]\nerror: window_capture_failed\ntarget_pid: {}\ntarget_process: {}",
-                    target_win.pid, target_win.process_name
-                ));
-                std::process::exit(1);
-            }
+            print_agent_stdout(&format!(
+                "[CAPTURED_IMAGE]\nstatus: success\nmode: {}\ntarget_pid: {}\ntarget_process: {}\ntarget_title: {}\nvirtual_desktop: {}\nresolution: {}x{}\ntile_optimized: {}\ngrid_overlay: {}\npath: {}",
+                mode_used,
+                target_win.pid,
+                target_win.process_name,
+                target_win.title,
+                target_win.is_virtual_desktop,
+                final_w,
+                final_h,
+                !options.raw_unoptimized,
+                options.enable_grid,
+                abs_out_path.display()
+            ));
+            std::process::exit(0);
         }
     }
 }
