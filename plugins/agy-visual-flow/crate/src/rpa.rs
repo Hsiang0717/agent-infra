@@ -161,14 +161,20 @@ pub fn execute_deterministic_type(text: &str, hwnd: Option<HWND>) -> Result<(), 
         }
 
         for ch in text.encode_utf16() {
+            let (vk, scan, flags) = if ch == '\r' as u16 || ch == '\n' as u16 {
+                (windows::Win32::UI::Input::KeyboardAndMouse::VK_RETURN, 0x1C, 0u32)
+            } else {
+                (VIRTUAL_KEY(0), ch, KEYEVENTF_UNICODE.0)
+            };
+
             let inputs = [
                 INPUT {
                     r#type: INPUT_KEYBOARD,
                     Anonymous: INPUT_0 {
                         ki: KEYBDINPUT {
-                            wVk: VIRTUAL_KEY(0),
-                            wScan: ch,
-                            dwFlags: KEYEVENTF_UNICODE,
+                            wVk: vk,
+                            wScan: scan,
+                            dwFlags: windows::Win32::UI::Input::KeyboardAndMouse::KEYBD_EVENT_FLAGS(flags),
                             time: 0,
                             dwExtraInfo: 0,
                         },
@@ -178,9 +184,9 @@ pub fn execute_deterministic_type(text: &str, hwnd: Option<HWND>) -> Result<(), 
                     r#type: INPUT_KEYBOARD,
                     Anonymous: INPUT_0 {
                         ki: KEYBDINPUT {
-                            wVk: VIRTUAL_KEY(0),
-                            wScan: ch,
-                            dwFlags: KEYEVENTF_UNICODE | KEYEVENTF_KEYUP,
+                            wVk: vk,
+                            wScan: scan,
+                            dwFlags: windows::Win32::UI::Input::KeyboardAndMouse::KEYBD_EVENT_FLAGS(flags | KEYEVENTF_KEYUP.0),
                             time: 0,
                             dwExtraInfo: 0,
                         },
