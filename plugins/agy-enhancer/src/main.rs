@@ -103,11 +103,11 @@ impl Default for MessagesConfig {
 }
 
 fn default_nominal_message() -> String {
-    "[Context Posture: NOMINAL] Working memory is abundant. Proceed with full surgical precision and end-to-end autonomy.".to_string()
+    "[Context Posture: NOMINAL] Working memory is abundant. Proceed with topological clarity, surgical precision, and end-to-end autonomy.".to_string()
 }
 
 fn default_tight_message() -> String {
-    "[Context Posture: TIGHT] Working memory is tightening. Avoid blind full-file dumps (use outline/rg; offload broad cross-file audits to research subagent). If a fix failed, do NOT repeat local tweaks—trace the upstream causal chain first.".to_string()
+    "[Context Posture: TIGHT] Working memory is tightening. Avoid blind full-file dumps (use outline/rg; offload broad cross-file audits to research subagent). If a fix failed or spans modules, do NOT repeat local tweaks—trace paired channels & align Where/Who/When first.".to_string()
 }
 
 fn default_critical_message() -> String {
