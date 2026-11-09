@@ -1,0 +1,11 @@
+{
+  "agy-ecl": {
+    "PreInvocation": [
+      {
+        "type": "command",
+        "command": "bin\\agy-ecl.exe",
+        "timeout": 5
+      }
+    ]
+  }
+}
