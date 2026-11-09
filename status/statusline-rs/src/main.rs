@@ -38,6 +38,8 @@ struct Payload {
     nerdfont: Option<bool>,
     classic: Option<bool>,
     theme: Option<String>,
+    session_id: Option<String>,
+    conversation_id: Option<String>,
 }
 
 #[derive(Deserialize, Default, Debug)]
@@ -829,6 +831,7 @@ fn main() {
         println!("CTX             Context window usage");
         println!("GEM / ARG / 3P  Model pool category (Gemini / Argon / Claude & GPT)");
         println!("5H / 7D         Quota remaining and cooldown reset timer");
+        println!("SES             Current conversation session ID");
         return;
     }
 
@@ -970,7 +973,7 @@ fn main() {
         .unwrap_or(0);
     let ctx_bar = build_context_bar(used_pct, use_classic);
 
-    let tok_details_wide = if ctx_limit > 0 {
+    let tok_details_wide = if ctx_limit > 0 && cols >= 65 {
         let ctx_used = ((ctx_limit as f64) * used_pct / 100.0).round() as u64;
         format!(
             "{}~{}{}{} / {} tokens{}",
@@ -981,6 +984,28 @@ fn main() {
             human_format(ctx_limit),
             R
         )
+    } else {
+        String::new()
+    };
+
+    // Session ID
+    let session_raw = payload
+        .session_id
+        .as_deref()
+        .or(payload.conversation_id.as_deref())
+        .unwrap_or("");
+    let session_fmt = if !session_raw.is_empty() {
+        let disp_id = if cols >= 120 {
+            session_raw.to_string()
+        } else {
+            session_raw.chars().take(8).collect::<String>()
+        };
+        if use_classic {
+            format!("{}ses: {}{}{}", FG_GRAY, FG_OAT, disp_id, R)
+        } else {
+            let icon_ses = "󰆍 ";
+            format!("{}{}{}{}{}", FG_GRAY, icon_ses, FG_OAT, disp_id, R)
+        }
     } else {
         String::new()
     };
@@ -1153,7 +1178,18 @@ fn main() {
     let l1_right = vec![user_fmt];
 
     let l2_left = vec![ctx_bar];
-    let l2_right = vec![tok_details_wide];
+    let mut l2_right = Vec::new();
+    if !tok_details_wide.is_empty() {
+        l2_right.push(tok_details_wide);
+    }
+    if !session_fmt.is_empty() {
+        let item = if l2_right.is_empty() {
+            session_fmt
+        } else {
+            format!("{}{}", dot_l2, session_fmt)
+        };
+        l2_right.push(item);
+    }
 
     let mut l3_left = Vec::new();
     if !q_5h_fmt.is_empty() { l3_left.push(q_5h_fmt); }

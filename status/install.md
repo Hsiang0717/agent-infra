@@ -6,6 +6,7 @@
 
 * **極致效能**：冷啟動執行耗時 < 20ms，記憶體佔用極低。
 * **固定 3 行自適應儀表板（Zero-Jitter Dashboard）**：依據終端寬度（60 / 80 / 100+ 欄位）階梯式緊湊化進度條與數值，徹底防止換行跳動。
+* **即時 Session ID 識別**：第二行即時顯示當前對話 Session / Conversation ID（寬螢幕 >= 120 欄完整顯示 UUID，窄螢幕自動緊湊為 8 碼短識別碼）。
 * **按需延遲載入（Lazy Loading）**：CLI Payload 已帶有 VCS 分支時，完全跳過 Git 查詢；非 Git 目錄透過純目錄探針短路返回。
 * **Morandi 莫蘭迪配色**：低飽和度 24-bit TrueColor，並精準支援原生 Nerd Font 圖標與 `--classic` 文字相容雙模式。
 
