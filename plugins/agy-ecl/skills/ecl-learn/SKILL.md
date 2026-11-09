@@ -12,6 +12,9 @@ The `/ecl-learn` command permanently anchors defensive invariants, platform quir
 
 ## Execution Protocol
 
+> **Execution Boundary (Stay in Active Agent — Do NOT Spawn Subagent)**:
+> Execute `/ecl-learn` directly inside the agent session that just diagnosed and fixed the issue. Because the causal chain and root cause are already in active working memory, delegating to a fresh subagent wastes tokens re-reading diffs and loses diagnostic nuance.
+
 ### Step 1: Diff & Blast Radius Audit
 Inspect the recent commit or active working tree modifications:
 ```powershell
@@ -33,11 +36,12 @@ rg -n -C 6 "<modified_file>" .agent/ecl.yaml
 
 ---
 
-### Step 3: High-Density Invariant Distillation
-Formulate an ultra-dense, imperative architectural rule:
-- **Format**: `<Imperative Constraint>（<Incident Context / Platform Quirks / Issue Ref>）`
+### Step 3: High-Density Causal & Invariant Distillation
+Formulate an ultra-dense, imperative architectural rule that makes future downstream modifications make sense:
+- **What to Capture**: Causal relationships (`A 觸發 B 導致 C`), business logic constraints, decoupled dependency chains, and strict event/temporal ordering (`必須先 X 才能 Y，否則 Z 被覆寫`).
+- **Format**: `<Event Order / Causal Constraint>（<Business Logic / Decoupled Dependency / Pitfall>）`
 - **Example**: `用戶拖曳進度條（user_scrub）期間，必須嚴格阻斷 100ms Polling Timer 覆寫 UI 滑桿位置以防跳針`
-- **Anti-Pattern**: Never record obvious pure functions or narrative stories. Record ONLY non-obvious cross-module couplings and defensive guards.
+- **Anti-Pattern (Not Code Comments)**: Never write traditional code comments or literal explanations of what a function does locally. Record ONLY cross-module causal links, state-ordering invariants, and hidden couplings.
 
 ---
 
