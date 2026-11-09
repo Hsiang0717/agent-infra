@@ -10,6 +10,13 @@
     "critical": "[Context Posture: CRITICAL] Halt new exploration; finish active atomic edit_file, verify, and invoke /compact || /handoff."
   },
   "memory_radar": {
-    "enabled": true
+    "enabled": true,
+    "active_template": "[Project Memory: active (.agents/memory/pitfalls.md - {count} entries; query via rg)]",
+    "files_template": "[Project Memory: active (.agents/memory/ - {count} files; query via rg)]",
+    "ready_template": "[Project Memory: ready (.agents/memory/pitfalls.md; distill non-obvious traps)]"
+  },
+  "slice_invariants": {
+    "enabled": true,
+    "template": "[Target Invariant: {details} — match verbatim in edit_file]"
   }
 }
