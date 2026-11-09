@@ -13,34 +13,11 @@ This protocol governs version control operations, branch lifecycles, and commit 
   - Types: `feat/*`, `fix/*`, `refactor/*`, `perf/*`, `docs/*`, `chore/*`.
 - **Short-Lived Topic Branches**: Scope branches strictly to the active task boundary; rebase against upstream (`git fetch && git rebase origin/main`) to maintain clean linear history.
 
-## 2. Diff Hygiene & Surgical Change Boundaries
-- **Minimal Diff Footprint**: Never introduce speculative refactoring, bulk whitespace changes, or whole-file reformatting in the same commit as functional logic or bug fixes.
-- **Extract-Before-Extend**: In tangled or overgrown modules, safely extract pure helpers/submodules in an isolated commit first before extending functionality.
-- **Secret & Residue Hygiene**: Never commit `.env`, credentials, tokens, or temporary scratch files. Purge debugging statements before staging.
+## 2. Diff Hygiene & Atomic Conventional Commits
+- **Minimal Diff & Secret Hygiene**: Never bundle unrelated modules, speculative refactoring, bulk formatting, `.env`/credentials, or temporary scratch files into commits.
+- **Empirical Style Alignment**: Inspect `git log -n 5 --oneline` to match repository convention (`<type>(<scope>): <imperative-subject>` vs `<type>: <imperative-subject>`), using standard types (`feat`, `fix`, `refactor`, `perf`, `docs`, `test`, `chore`).
+- **Pre-Commit Verification & Clean Closure**: Verify syntax/AST validity before staging (`git add <files>` ➔ `git commit -m "..."`), then confirm clean working tree via `git status -s`.
 
-## 3. Atomic Conventional Commits & Empirical Style Alignment
-- **Atomic Principle**: One commit = one logical change. Never bundle unrelated modules or mixed concerns into a single massive commit.
-- **Empirical Style Detection**: Inspect existing repo history via `git log -n 5 --oneline` to match project conventions:
-  - Format: `<type>[optional scope]: <imperative-subject>`
-  - Use `<type>(<scope>): <msg>` if repository history uses scopes (e.g. monorepos or modular packages).
-  - Use `<type>: <msg>` if repository uses flat commits or scope is not applicable.
-- **Semantic Classification**:
-  - `feat`: New user-facing capability or system feature
-  - `fix`: Bug fix or error resolution
-  - `refactor`: Structural reorganization without behavioral change
-  - `perf`: Performance optimization
-  - `docs`: Documentation, README, or API reference updates
-  - `test`: Test suite, fixture, or mock additions/updates
-  - `chore`: Tooling, build configuration, or dependency updates
-
-## 4. Pre-Commit Verification Gate & Clean Closure
-- **Tier 1 Syntax Gate**: Verify parse/AST validity before staging (`python -m py_compile`, `tsc --noEmit`, `cargo check`).
-- **Native Execution**: Stage files surgically via `git add <files>` and commit natively via `git commit -m "..."`.
-- **End-to-End Closure**: Verify post-commit state with `git status -s` (guaranteeing zero leftover untracked/unstaged debris) and `git log -n 3 --oneline`.
-
-## 5. Linear History & Non-Interactive Consolidation
-- **Zero Interactive Rebase**: Never execute interactive `git rebase -i` in autonomous sessions (prevents TTY editor hanging and subshell deadlocks).
-- **Soft-Reset Consolidation**: To squash or re-cluster fragmented WIP commits before merging into main, use non-interactive soft reset:
-  `git reset --soft origin/main`
-  and re-commit atomically via Conventional Commits.
-- **Linear Upstream Rebase**: Rebase topic branches non-interactively against upstream: `git fetch origin && git rebase origin/main`.
+## 3. Linear History & Non-Interactive Consolidation
+- **Zero Interactive Rebase**: Never execute interactive `git rebase -i` or `git commit` without `-m` in autonomous sessions (prevents TTY editor hanging).
+- **Soft-Reset Consolidation**: To squash fragmented WIP commits before merging, run `git reset --soft origin/main` and re-commit atomically.

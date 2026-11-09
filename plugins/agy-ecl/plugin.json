@@ -1,0 +1,4 @@
+{
+  "name": "agy-ecl",
+  "description": "External Cognitive Layer (ECL) for AI Coding Agents. Manages project causal clusters, zero-token line synchronization, and progressive disclosure reading protocols to eliminate discovery noise and regression bugs."
+}

@@ -9,18 +9,10 @@ description: "Enforce Windows pwsh environment, agent-native CLI tools (rg, fd, 
   - The runtime environment is Windows with PowerShell 7 (`pwsh`).
   - Always use PowerShell syntax: `$env:VAR = "value"`, `Get-Command` (never Bash idioms like `export` or `which`).
 
-- **Inspection, Search & Editing Hierarchy (Native Tools First):**
-  - **1. Directory & Scale Discovery:** Always use `lsj [path]` (compact JSON with exact byte size `"b"`) or `topj [count] [path]` to inspect topology and file sizes, or `fd [pattern]` for file search (auto-ignores `.git`/`node_modules`). Never run raw shell listing commands (`Get-ChildItem`, `dir`, `ls`, `tree`), which bloat tokens and truncate columns.
-  - **2. Pre-Read Outline Gate & Logical-Unit Slicing:**
-    - Use native `read_file` with explicit `StartLine` and `EndLine` parameters sized to capture the **complete logical unit** (full function, state handler, or struct block—typically 40–120 lines; files `<300` lines may be read directly). Never run raw shell dump or context-slicing commands (`cat`, `type`, `Get-Content`, `Select-String`).
-    - For modules >300 lines (`"b" > 10000` in `lsj`), never call unbounded `read_file` on the whole file: run `outline <file>` (or `rg -n <pattern> <file>`) first to pinpoint exact structural coordinates, then read the complete targeted logical unit without chopping functions in half.
-  - **3. Code Search & Structural Precision (Funnel Protocol):**
-    - Use `rg -n <pattern> <path>` for fast, targeted code and text searches (always pass an explicit `<path>` such as `src/` or `.` so `rg` never blocks waiting on non-TTY piped stdin). Suppress noise by narrowing query terms or scoping to specific subdirectories.
-  - **4. Surgical File Editing Protocol (Minimal Unique Target):**
-    - Use `edit_file` for surgical replacements and `write_file` only for new files or full rewrites.
-    - **Micro-Anchoring:** Copy `Target` verbatim from a fresh read slice strictly within read boundaries. Keep `Target` scoped to the minimal unique context needed (enclosing signature/condition). Because `edit_file` replaces all occurrences, never target generic repeated statements or bare whitespace alone. Avoid bloated multi-statement targets to eliminate whitespace/drift mismatch risks.
-    - **Target Invariant Compliance:** When the system hook injects a `[Target Invariant: ...]` notice (e.g. non-standard 3-space indentation, tabs, trailing whitespace, or double backslashes), match the cited invariant verbatim. Never assume conventional 4-space markdown/PEP8 indentation. Note that in JSON tool calls, source code backslashes must be double-escaped (e.g. source `\\node` must be serialized as `\\\\node` in JSON).
-  - **5. VCS Status:** Use native `git status -s` (minimal 2-char status prefix).
+- **Shell Command Boundaries (Native Tools First):**
+  - **Directory & File Discovery:** Use `lsj [path]`, `topj [count] [path]`, or `fd [pattern]`. Never run raw shell listing commands (`Get-ChildItem`, `dir`, `ls`, `tree`).
+  - **File Reading & Code Search:** Use native `read_file` (`outline <file>` first if >300 lines) and `rg -n <pattern> <path>` (always pass an explicit `<path>` like `src/` or `.` so `rg` never blocks on non-TTY stdin). Never run raw shell dump commands (`cat`, `type`, `Get-Content`, `Select-String`).
+  - **VCS Status:** Use `git status -s` (minimal 2-char status prefix).
 
 - **Agent-Native CLI Helpers (Essential pwsh extensions):**
   - **Topology & Large Files:**
