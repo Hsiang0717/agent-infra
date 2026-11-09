@@ -107,7 +107,7 @@ def build_cluster_skeletons(topology: dict, root_dir: Path):
         cluster_id = f"flow_{ep['symbol'].lower()}"
         cluster = {
             "cluster_id": cluster_id,
-            "summary": f"[TODO_LLM_SUMMARY: Describe business intent of {ep['symbol']}]",
+            "summary": f"[TODO_LLM_SUMMARY: Domain business logic & causal purpose of {ep['symbol']} (NOT literal code description)]",
             "entrypoint": {
                 "id": f"{ep['file']}#L{start_l}-{end_l}",
                 "symbol": ep["symbol"],
@@ -115,7 +115,7 @@ def build_cluster_skeletons(topology: dict, root_dir: Path):
             },
             "chain": [],
             "rules": [
-                f"[TODO_LLM_RULE: Invariants and constraints for {ep['symbol']}]"
+                f"[TODO_LLM_RULE: Event ordering, decoupled dependencies & causal invariants for {ep['symbol']} (NO code comments)]"
             ],
         }
 
@@ -127,7 +127,7 @@ def build_cluster_skeletons(topology: dict, root_dir: Path):
                         {
                             "node": f"{l['file']}#L{l['line']}-{l['line'] + 15}",
                             "symbol": evt,
-                            "effect": f"[TODO_LLM_EFFECT: Side-effect on event {evt}]",
+                            "effect": f"[TODO_LLM_EFFECT: Downstream causal side-effect & state mutation on {evt}]",
                         }
                     )
 
@@ -139,8 +139,8 @@ def build_cluster_skeletons(topology: dict, root_dir: Path):
 def generate_ecl_file(clusters_by_domain: dict, output_path: Path):
     output_path.parent.mkdir(parents=True, exist_ok=True)
     lines = [
-        "# External Cognitive Layer (ECL) — High-Signal Causal & Invariant Ledger\n",
-        "# Contains ONLY non-obvious cross-module couplings, async race guards, and platform pitfalls.\n\n",
+        "# External Cognitive Layer (ECL) — High-Signal Causal & Business Invariant Ledger\n",
+        "# Captures ONLY business logic, causal chains, decoupled dependencies, and event ordering (NEVER literal code comments).\n\n",
         "clusters:\n",
     ]
     for clusters in clusters_by_domain.values():
