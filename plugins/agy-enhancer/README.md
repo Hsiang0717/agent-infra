@@ -17,25 +17,25 @@
 
 ## 核心四大增強模組
 
-1. **Context Posture Governance（工作記憶體姿態調度）**：
+1. **Context Posture Governance（200k 零噪音工作記憶體調度與近因重錨定）**：
    * 透過 Hook `stdin` 傳入的 `transcriptPath`，以反向區塊 Seek（`SeekFrom::Start`）只掃描檔案末尾。
    * 解析出最新一輪 `PLANNER_RESPONSE` 的權威計數：`input_tokens` 與 `cache_read_tokens`。
-   * 依據額度與比例動態注入三級語意姿態提示（`ephemeralMessage`）：
-     - **NOMINAL**（正常）：`[Context Posture: NOMINAL]` 保持全速精準自主推論。
-     - **TIGHT**（緊繃）：`[Context Posture: TIGHT]` 提示縮窄讀取切片，將發散研究委派給 `research` subagent。
-     - **CRITICAL**（臨界）：`[Context Posture: CRITICAL]` 提示停止盲目探索，收斂進行中編輯並準備 `/handoff` 或 `/compact`。
+   * 以 **200k tokens** 為最佳注意力基準，動態執行「平時靜默 ＋ 長文本近因重錨定（Recency Re-Anchoring）」：
+     - **NOMINAL**（`< 60%` / `< 120k`）：**完全靜默（Zero Noise）**，不輸出任何冗餘標籤，避免日常回合產生注意力疲勞。
+     - **TIGHT**（`60% ~ 85%` / `120k ~ 170k`）：注入 `[Context Posture: TIGHT]` 近因重錨定，提醒使用 `outline`/`rg` 精準切片、將跨檔檢索委派給 `research` subagent，並在修復失敗時追查跨模組因果鏈而非重複局部微調。
+     - **CRITICAL**（`>= 85%` / `>= 170k`）：注入 `[Context Posture: CRITICAL]` 啟動嚴格 Context Firewall，將剩餘探索、Log 排查或獨立子任務全面委派給 `research`/`self` subagent，主對話僅執行 `rg` 錨點編輯並直接完成驗證閉環（絕不催促使用者 `/compact` 或 `/handoff`）。
    * **零數字干擾**：計算全留在 Rust 底層，絕不向 LLM 洩漏數字雜訊。
-2. **Epistemic Memory Radar（專案實證記憶雷達）**：
+2. **Epistemic Memory Radar（專案實證記憶雷達 — 64KB 視窗冷卻防刷屏）**：
    * 自動探測當前 Workspace 是否包含 `.agents/memory/`（如 `pitfalls.md`）。
-   * 實時喚醒 Agent 記憶 awareness：
-     - 若偵測到條目：注入 `[Project Memory: active (.agents/memory/pitfalls.md - N entries; query via rg)]`，引導 Agent 查閱避坑。
-     - 若目錄存在但尚未沉澱：注入 `[Project Memory: ready (...; distill non-obvious traps)]`，提醒在 Phase 4 沉澱關鍵避坑。
-     - 若專案未啟用 memory 目錄則保持完全靜默（Zero Noise）。
-3. **Target Invariant Detector（代碼排版不變量感知）**：
-   * 當前一步驟執行了 `read_file`，Hook 自動分析讀取切片中的微觀排版特徵：
-     - **非典型縮排**：探測奇數空格（如 3 格、5 格）或 Tab 縮排，防止模型慣性套用 4 格縮排。
+   * 採 **Session 開局喚醒 ＋ 64KB 滾動視窗去重**（避免每輪工具呼叫重複刷屏造成橫幅麻痺）：
+     - 若偵測到條目且近期 64KB Transcript 內尚未提醒：注入 `[Project Memory: active (.agents/memory/pitfalls.md - N entries; query via rg)]`。
+     - 若目錄存在但尚未沉澱：注入 `[Project Memory: ready (...; distill non-obvious traps)]`。
+     - 若專案未啟用 memory 目錄或近期已提醒過，則保持完全靜默（Zero Noise）。
+3. **Target Invariant Detector（多檔平行讀取支援與排版不變量感知）**：
+   * 當前一回合執行了 `read_file`（支援同一回合平行讀取多個檔案合併掃描），Hook 自動分析讀取切片中的微觀排版特徵：
+     - **非典型縮排**：探測奇數空格（如 3 格、5 格，自動排除 ` * ` 多行註解星號行）或 Tab 縮排，防止模型慣性套用 4 格縮排。
      - **跳脫字元**：探測程式碼中的雙反斜線（`\\` 如 LaTeX 或正則），提醒模型在 JSON 工具呼叫中加倍跳脫（`\\\\`）。
-     - **行尾空白**：探測肉眼不可見的行尾空白，避免 `edit_file` 比對失敗。
+     - （註：行尾空白已交由 `PreToolUse` 無感自愈對齊，不再拋出警告消耗模型注意力。）
    * 輸出如 `[Target Invariant: 3-space indent; \\ escape; match verbatim]`，達成零失誤編輯。
 4. **PreToolUse Active Interception & Self-Healing（編輯攔截與自愈修復）**：
    * 掛載於 `PreToolUse` (`edit_file`)，主動執行安全檢查：
@@ -78,9 +78,9 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File .\plugins\agy-enhancer\install.ps1
     "critical": 0.85
   },
   "messages": {
-    "nominal": "[Context Posture: NOMINAL]",
-    "tight": "[Context Posture: TIGHT] Scope read_file directly to target edit sites; verify & converge.",
-    "critical": "[Context Posture: CRITICAL] Halt new exploration; finish active atomic edit_file, verify, and invoke /compact || /handoff."
+    "nominal": "",
+    "tight": "[Context Posture: TIGHT] Avoid blind full-file dumps (use outline/rg; offload broad cross-file audits to research subagent). If a fix failed or spans modules, do NOT repeat local tweaks—trace paired channels & align Where/Who/When first.",
+    "critical": "[Context Posture: CRITICAL] Working memory near ceiling. Offload remaining discovery, log forensics, or isolated subtasks to research/self subagents; keep primary reads strictly rg-anchored, suppress verbose CLI output, and converge directly on verified completion."
   },
   "memory_radar": {
     "enabled": true

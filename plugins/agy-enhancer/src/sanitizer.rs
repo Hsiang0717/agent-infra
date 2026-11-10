@@ -102,7 +102,7 @@ pub(crate) fn find_unique_blank_line_tolerant_match(candidate_target: &str, file
         .filter(|l| !l.trim().is_empty())
         .collect();
 
-    // Guard: require at least 2 non-blank lines to avoid ambiguous matching on single statements
+    // Guard: require at least 2 non-blank lines (single-line targets already substring-match before trailing ws)
     if target_meaningful.len() < 2 {
         return None;
     }
@@ -121,19 +121,21 @@ pub(crate) fn find_unique_blank_line_tolerant_match(candidate_target: &str, file
 
         let mut meaningful_idx = 1;
         let mut end_idx = start_idx;
-        for curr_idx in (start_idx + 1)..file_lines.len() {
-            let line = file_lines[curr_idx];
-            if line.trim().is_empty() {
-                continue;
-            }
-            if line.trim_end() == target_meaningful[meaningful_idx] {
-                meaningful_idx += 1;
-                end_idx = curr_idx;
-                if meaningful_idx == n_meaningful {
+        if n_meaningful > 1 {
+            for curr_idx in (start_idx + 1)..file_lines.len() {
+                let line = file_lines[curr_idx];
+                if line.trim().is_empty() {
+                    continue;
+                }
+                if line.trim_end() == target_meaningful[meaningful_idx] {
+                    meaningful_idx += 1;
+                    end_idx = curr_idx;
+                    if meaningful_idx == n_meaningful {
+                        break;
+                    }
+                } else {
                     break;
                 }
-            } else {
-                break;
             }
         }
 

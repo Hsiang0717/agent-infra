@@ -5,9 +5,9 @@
     "critical": 0.85
   },
   "messages": {
-    "nominal": "[Context Posture: NOMINAL]",
+    "nominal": "",
     "tight": "[Context Posture: TIGHT] Avoid blind full-file dumps (use outline/rg; offload broad cross-file audits to research subagent). If a fix failed or spans modules, do NOT repeat local tweaks—trace paired channels & align Where/Who/When first.",
-    "critical": "[Context Posture: CRITICAL] Halt new exploration; finish active atomic edit_file, verify, and invoke /compact || /handoff."
+    "critical": "[Context Posture: CRITICAL] Working memory near ceiling. Offload remaining discovery, log forensics, or isolated subtasks to research/self subagents; keep primary reads strictly rg-anchored, suppress verbose CLI output, and converge directly on verified completion."
   },
   "memory_radar": {
     "enabled": true,
