@@ -2,10 +2,10 @@ use serde::{Deserialize, Serialize};
 use std::env;
 use std::path::{Path, PathBuf};
 
-/// Default context window limit: 256k tokens.
-pub const DEFAULT_CONTEXT_LIMIT_TOKENS: u64 = 256_000;
+/// Default context window limit: 200k tokens.
+pub const DEFAULT_CONTEXT_LIMIT_TOKENS: u64 = 200_000;
 pub const DEFAULT_TIGHT_THRESHOLD: f64 = 0.60;
-pub const DEFAULT_CRITICAL_THRESHOLD: f64 = 0.90;
+pub const DEFAULT_CRITICAL_THRESHOLD: f64 = 0.85;
 
 // ─── Configuration Structures ───────────────────────────────────────────────
 
@@ -145,15 +145,15 @@ impl Default for MessagesConfig {
 }
 
 fn default_nominal_message() -> String {
-    "[Context Posture: NOMINAL] Working memory is abundant. Proceed with topological clarity, surgical precision, and end-to-end autonomy.".to_string()
+    String::new()
 }
 
 fn default_tight_message() -> String {
-    "[Context Posture: TIGHT] Working memory is tightening. Avoid blind full-file dumps (use outline/rg; offload broad cross-file audits to research subagent). If a fix failed or spans modules, do NOT repeat local tweaks—trace paired channels & align Where/Who/When first.".to_string()
+    "[Context Posture: TIGHT] Avoid blind full-file dumps (use outline/rg; offload broad cross-file audits to research subagent). If a fix failed or spans modules, do NOT repeat local tweaks—trace paired channels & align Where/Who/When first.".to_string()
 }
 
 fn default_critical_message() -> String {
-    "[Context Posture: CRITICAL] Working memory near ceiling. Cease broad exploration, converge on active atomic changes, and prepare /handoff.".to_string()
+    "[Context Posture: CRITICAL] Working memory near ceiling. Offload remaining discovery, log forensics, or isolated subtasks to research/self subagents; keep primary reads strictly rg-anchored, suppress verbose CLI output, and converge directly on verified completion.".to_string()
 }
 
 // ─── Config Discovery & Loading ─────────────────────────────────────────────

@@ -167,21 +167,51 @@ fn main() {
 
     let (cfg, _) = load_config(ws_root);
     let (used_tokens, _) = probe_transcript_tokens(transcript_path);
-    let mut message = build_semantic_message(used_tokens, &cfg);
+    let mut parts = Vec::new();
+
+    let posture_msg = build_semantic_message(used_tokens, &cfg);
+    if !posture_msg.trim().is_empty() {
+        let limit = if cfg.context_limit == 0 {
+            DEFAULT_CONTEXT_LIMIT_TOKENS
+        } else {
+            cfg.context_limit
+        };
+        let used_pct = ((used_tokens as f64 / limit as f64) * 100.0).clamp(0.0, 100.0);
+        let tier = classify_tier(used_pct, &cfg.thresholds);
+        let tier_marker = match tier {
+            ContextTier::Critical => "[Context Posture: CRITICAL]",
+            ContextTier::Tight => "[Context Posture: TIGHT]",
+            ContextTier::Nominal => "[Context Posture: NOMINAL]",
+        };
+        if !has_recent_ephemeral_marker(transcript_path, tier_marker, Some(5)) {
+            parts.push(posture_msg);
+        }
+    }
 
     if cfg.slice_invariants.enabled {
         if let Some(hint) = probe_recent_read_invariants_with_template(transcript_path, &cfg.slice_invariants.template) {
-            message.push(' ');
-            message.push_str(&hint);
+            if !hint.trim().is_empty() {
+                parts.push(hint);
+            }
         }
     }
 
     if cfg.memory_radar.enabled {
-        if let Some(mem_hint) = probe_project_memory_with_config(ws_root, &cfg.memory_radar) {
-            message.push(' ');
-            message.push_str(&mem_hint);
+        if !has_recent_ephemeral_marker(transcript_path, "[Project Memory:", None) {
+            if let Some(mem_hint) = probe_project_memory_with_config(ws_root, &cfg.memory_radar) {
+                if !mem_hint.trim().is_empty() {
+                    parts.push(mem_hint);
+                }
+            }
         }
     }
+
+    if parts.is_empty() {
+        emit_empty_response();
+        return;
+    }
+
+    let message = parts.join(" ");
 
     let output = HookOutput {
         inject_steps: vec![InjectStep {
@@ -220,8 +250,8 @@ mod tests {
         assert_eq!(classify_tier(0.0, &thresholds), ContextTier::Nominal);
         assert_eq!(classify_tier(59.9, &thresholds), ContextTier::Nominal);
         assert_eq!(classify_tier(60.0, &thresholds), ContextTier::Tight);
-        assert_eq!(classify_tier(89.9, &thresholds), ContextTier::Tight);
-        assert_eq!(classify_tier(90.0, &thresholds), ContextTier::Critical);
+        assert_eq!(classify_tier(84.9, &thresholds), ContextTier::Tight);
+        assert_eq!(classify_tier(85.0, &thresholds), ContextTier::Critical);
         assert_eq!(classify_tier(100.0, &thresholds), ContextTier::Critical);
     }
 
@@ -247,16 +277,18 @@ mod tests {
     #[test]
     fn test_semantic_message_content() {
         let cfg = MonitorConfig::default();
-        let nom = build_semantic_message(25_600, &cfg);
-        assert!(nom.contains("NOMINAL"));
-        assert!(!nom.contains("%"));
+        let nom = build_semantic_message(25_000, &cfg);
+        assert!(nom.is_empty());
 
-        let tight = build_semantic_message(179_200, &cfg);
+        let tight = build_semantic_message(140_000, &cfg);
         assert!(tight.contains("TIGHT"));
         assert!(!tight.contains("%"));
 
-        let crit = build_semantic_message(240_000, &cfg);
+        let crit = build_semantic_message(180_000, &cfg);
         assert!(crit.contains("CRITICAL"));
+        assert!(crit.contains("subagents"));
+        assert!(!crit.contains("/compact"));
+        assert!(!crit.contains("/handoff"));
         assert!(!crit.contains("%"));
     }
 
@@ -442,21 +474,55 @@ mod tests {
         let py_content = "Showing lines 10-15 of 100\n10: def compute_total(items):\n11:     total = 0\n12:     for item in items:\n13:         total += item.price\n14:     return total\n";
         assert_eq!(SliceInvariants::detect_from_read_output(py_content), None);
 
-        let ts_content = "Showing lines 1-4 of 50\n1: export function add(a: number, b: number): number {\n2:   return a + b;\n3: }\n";
+        let ts_content = "Showing lines 1-6 of 50\n1: /**\n2:  * Standard JSDoc comment with 1-space before star\n3:  */\n4: export function add(a: number, b: number): number {\n5:   return a + b;\n6: }\n";
         assert_eq!(SliceInvariants::detect_from_read_output(ts_content), None);
     }
 
     #[test]
-    fn test_slice_invariants_tabs_and_trailing() {
+    fn test_slice_invariants_tabs_and_trailing_ws_auto_healed() {
         let tab_content = "Showing lines 1-2 of 10\n1:\tfunc main() {\n2:\t\tprintln(\"hello\")\n";
         let inv = SliceInvariants::detect_from_read_output(tab_content).expect("Should detect tabs");
         assert!(inv.has_tabs);
         assert!(inv.format_hint().contains(r"tab (\t) indent"));
 
-        let trailing_content = "Showing lines 1-2 of 10\n1:    line with trailing space   \n2:    normal line\n";
-        let inv2 = SliceInvariants::detect_from_read_output(trailing_content).expect("Should detect trailing ws");
-        assert!(inv2.has_trailing_ws);
-        assert!(inv2.format_hint().contains("trailing whitespace"));
+        // Trailing whitespace alone does not nag the LLM (handled silently by sanitizer.rs)
+        let trailing_content = "Showing lines 1-2 of 10\n1:     line with trailing space   \n2:     normal line\n";
+        assert_eq!(SliceInvariants::detect_from_read_output(trailing_content), None);
+
+        // Verify sanitizer.rs auto-heals multi-line targets spanning lines with trailing whitespace
+        let file_with_trailing = "fn demo() {\n    let x = 42;   \n    return x;\n}\n";
+        assert_eq!(
+            sanitize_edit_target("    let x = 42;\n    return x;", file_with_trailing),
+            Some("    let x = 42;   \n    return x;".to_string())
+        );
+    }
+
+    #[test]
+    fn test_parallel_read_invariants_and_ephemeral_cooldown() {
+        use std::io::Write;
+        let temp_dir = std::env::temp_dir();
+        let test_file = temp_dir.join(format!("test_parallel_inv_{}.jsonl", std::process::id()));
+
+        let sample_lines = r#"{"type":"USER_INPUT","content":"check files"}
+{"type":"EPHEMERAL_MESSAGE","content":"[Project Memory: active (.agents/memory/pitfalls.md - 12 entries; query via rg)]"}
+{"type":"PLANNER_RESPONSE","input_tokens":1000,"output_tokens":100}
+{"type":"GENERIC","content":"Showing lines 1-2 of 10\n1:\tfunc main() {\n2:\t\treturn\n"}
+{"type":"GENERIC","content":"Showing lines 1-2 of 10\n1: def clean_python():\n2:     return True\n"}
+"#;
+        {
+            let mut f = File::create(&test_file).unwrap();
+            f.write_all(sample_lines.as_bytes()).unwrap();
+        }
+
+        // Should detect tab invariant from first GENERIC step even though second GENERIC step is clean
+        let hint = probe_recent_read_invariants(&test_file).expect("Should merge parallel read_file invariants");
+        assert!(hint.contains(r"tab (\t) indent"));
+
+        // Should detect recent [Project Memory: marker in the 64KB chunk
+        assert!(has_recent_ephemeral_marker(&test_file, "[Project Memory:", None));
+        assert!(!has_recent_ephemeral_marker(&test_file, "[Context Posture: CRITICAL]", Some(5)));
+
+        let _ = std::fs::remove_file(&test_file);
     }
 
     #[test]
