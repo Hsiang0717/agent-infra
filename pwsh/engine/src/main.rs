@@ -714,8 +714,51 @@ fn main() {
         Set-PSReadLineOption -HistorySearchCursorMovesToEnd -ErrorAction Stop
     }} catch {{}}
 
-    # 3. 原生命令列鍵位
-    Set-PSReadLineKeyHandler -Chord "UpArrow" -Function HistorySearchBackward
+    # 3. 原生命令列鍵位 (UpArrow 具備防撕裂與背景輸出自動校正)
+    Set-PSReadLineKeyHandler -Chord "UpArrow" -ScriptBlock {{
+        param($key, $arg)
+        $flags = [System.Reflection.BindingFlags]'NonPublic,Instance,Static'
+        $singletonField = [Microsoft.PowerShell.PSConsoleReadLine].GetField('_singleton', $flags)
+        $initYField = [Microsoft.PowerShell.PSConsoleReadLine].GetField('_initialY', $flags)
+        $initXField = [Microsoft.PowerShell.PSConsoleReadLine].GetField('_initialX', $flags)
+        $inst = if ($singletonField) {{ $singletonField.GetValue($null) }} else {{ $null }}
+
+        # 執行前校正：若實體游標已被背景輸出推擠至下方 (例如 gcloud/agy)，動態修正錨點防撕裂
+        if ($inst -and $initYField) {{
+            try {{
+                $curTop = [Console]::CursorTop
+                $initY = [int]$initYField.GetValue($inst)
+                if ($curTop -gt $initY) {{
+                    $initYField.SetValue($inst, $curTop)
+                }}
+            }} catch {{}}
+        }}
+
+        # 執行歷史搜尋
+        [Microsoft.PowerShell.PSConsoleReadLine]::HistorySearchBackward($key, $arg)
+
+        # 執行後校正：超長或多行 CJK 指令換行導致視窗向上捲動時，即時補償 _initialY 消除殘影
+        if ($inst -and $initYField -and $initXField) {{
+            try {{
+                $line = $null
+                $cursor = $null
+                [Microsoft.PowerShell.PSConsoleReadLine]::GetBufferState([ref]$line, [ref]$cursor)
+                if ($line) {{
+                    $initX = [int]$initXField.GetValue($inst)
+                    $w = 0
+                    foreach ($c in $line.ToCharArray()) {{
+                        if ([int]$c -ge 0x2e80) {{ $w += 2 }} else {{ $w += 1 }}
+                    }}
+                    $bufWidth = [Math]::Max(1, [Console]::BufferWidth)
+                    $lines = [int][Math]::Ceiling(($initX + $w + 1) / $bufWidth)
+                    if ($lines -gt 1) {{
+                        $expectedY = [Math]::Max(0, [Console]::CursorTop - ($lines - 1))
+                        $initYField.SetValue($inst, $expectedY)
+                    }}
+                }}
+            }} catch {{}}
+        }}
+    }}
     Set-PSReadLineKeyHandler -Chord "Tab" -Function TabCompleteNext
     Set-PSReadLineKeyHandler -Chord "Shift+Tab" -Function TabCompletePrevious
 
