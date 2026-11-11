@@ -713,13 +713,14 @@ fn main() {
         Set-PSReadLineOption -HistoryNoDuplicates -ErrorAction Stop
     }} catch {{}}
 
-    # 3. 原生命令列鍵位
+    # 3. 原生命令列鍵位 (上下鍵成對原生歷史搜尋，絕不破圖)
     Set-PSReadLineKeyHandler -Chord "UpArrow" -Function HistorySearchBackward
+    Set-PSReadLineKeyHandler -Chord "DownArrow" -Function HistorySearchForward
     Set-PSReadLineKeyHandler -Chord "Tab" -Function TabCompleteNext
     Set-PSReadLineKeyHandler -Chord "Shift+Tab" -Function TabCompletePrevious
 
-    # 4. 內聯選單觸發：按 DownArrow 進入內聯選單 (左右排版、禁止原生操作)
-    Set-PSReadLineKeyHandler -Chord "DownArrow" -ScriptBlock {{
+    # 4. 內聯選單觸發：按 Alt+Down 或 Ctrl+Down 進入內聯選單 (左右排版)
+    $smartHubInlineBlock = {{
         param($key, $arg)
         $line = $null
         $cursor = $null
@@ -776,6 +777,8 @@ fn main() {
             }}
         }}
     }}
+    Set-PSReadLineKeyHandler -Chord "Alt+DownArrow" -ScriptBlock $smartHubInlineBlock
+    Set-PSReadLineKeyHandler -Chord "Ctrl+DownArrow" -ScriptBlock $smartHubInlineBlock
 
     # 5. 右方向鍵快速補全幽靈文字
     Set-PSReadLineKeyHandler -Chord "RightArrow" -ScriptBlock {{
