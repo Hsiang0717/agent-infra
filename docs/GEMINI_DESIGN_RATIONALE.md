@@ -73,6 +73,14 @@ Antigravity (AGY) 是定位於 **Staff Software Engineer（資深主任軟體工
   2. **因果鏈追蹤優先（Causal-Chain Tracing: Symptom ≠ Root Cause）**：動刀修 Bug 前，必須先確認 `Upstream Producer / Caller ➔ State / Channel / Lifecycle ➔ Downstream Consumer / Callback` 的完整流向，確認狀態在何處被初始化、變更或非同步覆寫。
   3. **2-Strike 第一性原理重置（First-Principles Reset）與 `TIGHT` 解綁**：將 `TIGHT` 定義為「避免無腦全檔傾倒（善用 `outline`/`rg` 與 `research` subagent），但絕不為省 Token 犧牲根因追查」；一旦連續 1–2 次局部修改未解決問題，強制停止在原處刮痧，先質疑既有假設（是否有其他執行緒/回呼/生命週期覆寫）並擴大上下游排查半徑。
 
+### 8. 「從 3.8 Flash 到 4 Hydrogen」的認知與編排校準 (Reasoning-Model Calibration)
+- **歷史教訓**：針對 3.8 Flash 設計的協議側重補償「思考不足與字面匹配缺陷」（逐行步驟、編輯防呆範例、硬性行數數字與單一案例補丁）。當主力模型升級至高推理模型（Gemini 4 Hydrogen）後，失效模式反轉為「過度思考、過度工程（順手重構無關程式碼）、過度編排開銷，以及為錯誤因果假設編寫複雜合理化補丁」；同時 `agy-enhancer` 的 `200k` 固定 `CRITICAL` 門檻在較長對話中過早催促收尾。
+- **演進決策**：
+  1. **拔除機械拐杖，保留物理不變量**：精簡已被 `sanitizer.rs` / `invariants.rs` 執行期吸收的排版教學與重複切片數字，僅保留真正無法靠推理繞過的物理契約（`edit_file` 全文多處替換風險、`rg` 必帶路徑、非交互式 Git 紀律）。
+  2. **比例原則與 Diff 最小化**：導入「快慢路徑分流（Proportionality）」（單模組小改直達外科修改，跨模組/有狀態變更才啟用完整 `Where/Who/When` 拓樸與 `[ECL Shield]` 檢查）以及「改動行可追溯至任務（Diff Minimality）」護欄。
+  3. **假說證偽與編排經濟學**：將 `2-Strike` 明確定義為「證偽因果心理模型（Falsification）」，並補上 `Direct` vs. `invoke_subagent` vs. `swarm` 的最小編排開銷準則。
+  4. **模型感知 Posture（`model_profiles`）**：啟用 `agy-enhancer` `HookInput.modelName` 比對，針對 Hydrogen 提供較寬鬆的注意力預算（`300k` / `0.65` / `0.88`）並移除催促提前收斂的字眼，同時保留零噪音與 Context Firewall。
+
 ---
 
 ## 🧩 三、四大階段生命週期與邊界決策 (The 4-Phase Lifecycle)

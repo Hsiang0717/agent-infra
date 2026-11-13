@@ -1,4 +1,4 @@
-[CmdletBinding(SupportsShouldProcess = $true)]
+﻿[CmdletBinding(SupportsShouldProcess = $true)]
 param(
     [switch]$Build,
     [switch]$Global,
@@ -65,9 +65,25 @@ if ($Global) {
             Write-Host "[Global] Synchronized rules (AAEP, CLI_TOOLCHAIN) to: $globalRulesDir" -ForegroundColor Cyan
         }
 
+        $srcConfig = Join-Path $pluginRoot 'config.json'
         $globalConfig = Join-Path $globalPluginDir 'config.json'
         if (-not (Test-Path -LiteralPath $globalConfig)) {
-            Copy-Item -LiteralPath (Join-Path $pluginRoot 'config.json') -Destination $globalConfig -Force
+            Copy-Item -LiteralPath $srcConfig -Destination $globalConfig -Force
+        }
+        elseif (Test-Path -LiteralPath $srcConfig) {
+            try {
+                $srcObj = Get-Content -LiteralPath $srcConfig -Raw -Encoding UTF8 | ConvertFrom-Json
+                $dstObj = Get-Content -LiteralPath $globalConfig -Raw -Encoding UTF8 | ConvertFrom-Json
+                $hasProfiles = ($null -ne $dstObj.PSObject.Properties['model_profiles']) -and ($dstObj.model_profiles.Count -gt 0)
+                if ((-not $hasProfiles) -and ($null -ne $srcObj.PSObject.Properties['model_profiles']) -and ($srcObj.model_profiles.Count -gt 0)) {
+                    $dstObj | Add-Member -NotePropertyName 'model_profiles' -NotePropertyValue $srcObj.model_profiles -Force
+                    $dstObj | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $globalConfig -Encoding UTF8
+                    Write-Host "[Global] Merged default model_profiles into existing config: $globalConfig" -ForegroundColor Cyan
+                }
+            }
+            catch {
+                Write-Warning "[Global] Could not inspect/merge existing config.json ($globalConfig): $_"
+            }
         }
         Write-Host "[Global] Successfully deployed plugin globally to: $globalPluginDir" -ForegroundColor Green
     }

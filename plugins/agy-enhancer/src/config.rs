@@ -69,6 +69,37 @@ pub fn default_slice_invariants_template() -> String {
     "[Target Invariant: {details} — match verbatim in edit_file]".to_string()
 }
 
+#[derive(Deserialize, Serialize, Debug, Clone, Default)]
+pub struct PartialThresholdConfig {
+    #[serde(default)]
+    pub tight: Option<f64>,
+    #[serde(default)]
+    pub critical: Option<f64>,
+}
+
+#[derive(Deserialize, Serialize, Debug, Clone, Default)]
+pub struct PartialMessagesConfig {
+    #[serde(default)]
+    pub nominal: Option<String>,
+    #[serde(default)]
+    pub tight: Option<String>,
+    #[serde(default)]
+    pub critical: Option<String>,
+}
+
+#[derive(Deserialize, Serialize, Debug, Clone)]
+pub struct ModelProfileConfig {
+    pub match_pattern: String,
+    #[serde(default)]
+    pub context_limit: Option<u64>,
+    #[serde(default)]
+    pub thresholds: Option<PartialThresholdConfig>,
+    #[serde(default)]
+    pub messages: Option<PartialMessagesConfig>,
+    #[serde(default)]
+    pub slice_invariants_enabled: Option<bool>,
+}
+
 #[derive(Deserialize, Serialize, Debug, Clone)]
 pub struct MonitorConfig {
     #[serde(default = "default_context_limit")]
@@ -81,6 +112,8 @@ pub struct MonitorConfig {
     pub memory_radar: MemoryRadarConfig,
     #[serde(default)]
     pub slice_invariants: SliceInvariantsConfig,
+    #[serde(default)]
+    pub model_profiles: Vec<ModelProfileConfig>,
 }
 
 impl Default for MonitorConfig {
@@ -91,7 +124,56 @@ impl Default for MonitorConfig {
             messages: MessagesConfig::default(),
             memory_radar: MemoryRadarConfig::default(),
             slice_invariants: SliceInvariantsConfig::default(),
+            model_profiles: Vec::new(),
         }
+    }
+}
+
+impl MonitorConfig {
+    /// Returns a config copy with the first matching `model_profiles` entry applied.
+    pub fn resolve_for_model(&self, model_name: Option<&str>) -> Self {
+        let Some(raw_name) = model_name else {
+            return self.clone();
+        };
+        let needle_target = raw_name.trim().to_lowercase();
+        if needle_target.is_empty() {
+            return self.clone();
+        }
+
+        let Some(profile) = self.model_profiles.iter().find(|p| {
+            let pat = p.match_pattern.trim().to_lowercase();
+            !pat.is_empty() && needle_target.contains(&pat)
+        }) else {
+            return self.clone();
+        };
+
+        let mut resolved = self.clone();
+        if let Some(limit) = profile.context_limit {
+            resolved.context_limit = limit;
+        }
+        if let Some(ref th) = profile.thresholds {
+            if let Some(tight) = th.tight {
+                resolved.thresholds.tight = tight;
+            }
+            if let Some(critical) = th.critical {
+                resolved.thresholds.critical = critical;
+            }
+        }
+        if let Some(ref msgs) = profile.messages {
+            if let Some(ref nominal) = msgs.nominal {
+                resolved.messages.nominal = nominal.clone();
+            }
+            if let Some(ref tight) = msgs.tight {
+                resolved.messages.tight = tight.clone();
+            }
+            if let Some(ref critical) = msgs.critical {
+                resolved.messages.critical = critical.clone();
+            }
+        }
+        if let Some(enabled) = profile.slice_invariants_enabled {
+            resolved.slice_invariants.enabled = enabled;
+        }
+        resolved
     }
 }
 
