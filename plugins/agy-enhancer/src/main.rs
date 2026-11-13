@@ -60,8 +60,8 @@ fn main() {
                 println!("  agy-enhancer                   Run as PreInvocation hook (reads stdin)");
                 println!("  agy-enhancer --pre-edit        Run as PreToolUse edit_file auto-sanitizer/normalizer");
                 println!("  agy-enhancer --config          Print currently resolved configuration");
-                println!("  agy-enhancer --probe <file>    Probe token counts and invariants from transcript file");
-                println!("  agy-enhancer --simulate <num>  Simulate semantic message for token count");
+                println!("  agy-enhancer --probe <file> [model]   Probe token counts and invariants from transcript file");
+                println!("  agy-enhancer --simulate <num> [model] Simulate semantic message for token count");
                 println!("  agy-enhancer --memory [dir]    Inspect project epistemic memory radar");
                 println!("  agy-enhancer --version         Show version");
                 return;
@@ -81,10 +81,15 @@ fn main() {
             "--probe" => {
                 if let Some(path_str) = args.get(2) {
                     let p = Path::new(path_str);
-                    let (cfg, cfg_path) = load_config(None);
+                    let (base_cfg, cfg_path) = load_config(None);
+                    let model_opt = args.get(3).map(|s| s.as_str());
+                    let cfg = base_cfg.resolve_for_model(model_opt);
                     let (used, output) = probe_transcript_tokens(p);
                     let msg = build_semantic_message(used, &cfg);
                     println!("Config Source   : {}", cfg_path.map(|p| p.display().to_string()).unwrap_or_else(|| "Defaults".to_string()));
+                    if let Some(m) = model_opt {
+                        println!("Model Profile   : {}", m);
+                    }
                     println!("Transcript Path : {}", path_str);
                     println!("Total Used      : {} tokens ({})", used, human_format(used));
                     println!("Last Output     : {} tokens ({})", output, human_format(output));
@@ -103,9 +108,15 @@ fn main() {
             "--simulate" => {
                 if let Some(tokens_str) = args.get(2) {
                     let tokens: u64 = tokens_str.parse().unwrap_or(0);
-                    let (cfg, _) = load_config(None);
+                    let (base_cfg, _) = load_config(None);
+                    let model_opt = args.get(3).map(|s| s.as_str());
+                    let cfg = base_cfg.resolve_for_model(model_opt);
                     let msg = build_semantic_message(tokens, &cfg);
                     println!("Simulated Tokens: {}", tokens);
+                    if let Some(m) = model_opt {
+                        println!("Model Profile   : {}", m);
+                    }
+                    println!("Limit           : {} tokens", cfg.context_limit);
                     println!("Message: {}", msg);
                 } else {
                     eprintln!("Error: missing token count for --simulate");
@@ -165,7 +176,8 @@ fn main() {
         .and_then(|v| v.first())
         .map(Path::new);
 
-    let (cfg, _) = load_config(ws_root);
+    let (base_cfg, _) = load_config(ws_root);
+    let cfg = base_cfg.resolve_for_model(input.model_name.as_deref());
     let (used_tokens, _) = probe_transcript_tokens(transcript_path);
     let mut parts = Vec::new();
 
@@ -547,5 +559,29 @@ mod tests {
         assert!(hint_active.contains("2 entries"));
 
         let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_model_profile_resolution_and_json_config() {
+        let raw_json = include_str!("../config.json");
+        let base_cfg: MonitorConfig = serde_json::from_str(raw_json).expect("config.json should deserialize cleanly");
+
+        // Unmatched or missing model retains base defaults (200k / 0.60 / 0.85)
+        let default_resolved = base_cfg.resolve_for_model(Some("Gemini 3.8 Flash"));
+        assert_eq!(default_resolved.context_limit, 200_000);
+        assert!(build_semantic_message(180_000, &default_resolved).contains("CRITICAL"));
+
+        // Hydrogen model matches case-insensitively and shifts to calibrated 300k posture
+        let hydrogen_resolved = base_cfg.resolve_for_model(Some("Gemini 4 Hydrogen (High)"));
+        assert_eq!(hydrogen_resolved.context_limit, 300_000);
+        assert!(build_semantic_message(180_000, &hydrogen_resolved).is_empty());
+        let tight_msg = build_semantic_message(200_000, &hydrogen_resolved);
+        assert!(tight_msg.contains("TIGHT"));
+        let crit_msg = build_semantic_message(270_000, &hydrogen_resolved);
+        assert!(crit_msg.contains("CRITICAL"));
+        assert!(!crit_msg.contains("converge directly"));
+        // Unoverridden fields remain intact
+        assert!(hydrogen_resolved.memory_radar.enabled);
+        assert!(hydrogen_resolved.slice_invariants.enabled);
     }
 }

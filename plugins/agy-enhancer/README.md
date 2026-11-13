@@ -17,13 +17,13 @@
 
 ## 核心四大增強模組
 
-1. **Context Posture Governance（200k 零噪音工作記憶體調度與近因重錨定）**：
-   * 透過 Hook `stdin` 傳入的 `transcriptPath`，以反向區塊 Seek（`SeekFrom::Start`）只掃描檔案末尾。
+1. **Context Posture Governance（模型感知零噪音工作記憶體調度與近因重錨定）**：
+   * 透過 Hook `stdin` 傳入的 `transcriptPath` 與 `modelName`，以反向區塊 Seek（`SeekFrom::Start`）只掃描檔案末尾，並支援依模型套用 `model_profiles`（例如對 Gemini 4 Hydrogen 自動切換至 `300k` 預算與非催促型 Posture 訊息）。
    * 解析出最新一輪 `PLANNER_RESPONSE` 的權威計數：`input_tokens` 與 `cache_read_tokens`。
-   * 以 **200k tokens** 為最佳注意力基準，動態執行「平時靜默 ＋ 長文本近因重錨定（Recency Re-Anchoring）」：
-     - **NOMINAL**（`< 60%` / `< 120k`）：**完全靜默（Zero Noise）**，不輸出任何冗餘標籤，避免日常回合產生注意力疲勞。
-     - **TIGHT**（`60% ~ 85%` / `120k ~ 170k`）：注入 `[Context Posture: TIGHT]` 近因重錨定，提醒使用 `outline`/`rg` 精準切片、將跨檔檢索委派給 `research` subagent，並在修復失敗時追查跨模組因果鏈而非重複局部微調。
-     - **CRITICAL**（`>= 85%` / `>= 170k`）：注入 `[Context Posture: CRITICAL]` 啟動嚴格 Context Firewall，將剩餘探索、Log 排查或獨立子任務全面委派給 `research`/`self` subagent，主對話僅執行 `rg` 錨點編輯並直接完成驗證閉環（絕不催促使用者 `/compact` 或 `/handoff`）。
+   * 以預設 **200k tokens**（可依 `model_profiles` 動態覆寫）為最佳注意力基準，動態執行「平時靜默 ＋ 長文本近因重錨定（Recency Re-Anchoring）」：
+     - **NOMINAL**（`< 60%` / 預設 `< 120k`）：**完全靜默（Zero Noise）**，不輸出任何冗餘標籤，避免日常回合產生注意力疲勞。
+     - **TIGHT**（預設 `60% ~ 85%`）：注入 `[Context Posture: TIGHT]` 近因重錨定，提醒使用 `outline`/`rg` 精準切片、將跨檔檢索委派給 `research` subagent，並在修復失敗時追查跨模組因果鏈而非重複局部微調。
+     - **CRITICAL**（預設 `>= 85%`）：注入 `[Context Posture: CRITICAL]` 啟動嚴格 Context Firewall，將剩餘探索、Log 排查或獨立子任務全面委派給 `research`/`self` subagent，主對話僅執行 `rg` 錨點編輯並推進驗證閉環（絕不催促使用者 `/compact` 或 `/handoff`）。
    * **零數字干擾**：計算全留在 Rust 底層，絕不向 LLM 洩漏數字雜訊。
 2. **Epistemic Memory Radar（專案實證記憶雷達 — 64KB 視窗冷卻防刷屏）**：
    * 自動探測當前 Workspace 是否包含 `.agents/memory/`（如 `pitfalls.md`）。
@@ -84,9 +84,25 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File .\plugins\agy-enhancer\install.ps1
   },
   "memory_radar": {
     "enabled": true
-  }
+  },
+  "model_profiles": [
+    {
+      "match_pattern": "hydrogen",
+      "context_limit": 300000,
+      "thresholds": {
+        "tight": 0.65,
+        "critical": 0.88
+      },
+      "messages": {
+        "tight": "[Context Posture: TIGHT] Protect working memory: use outline/rg slices, delegate broad audits to research subagent, and trace causal chains rather than repeating local edits.",
+        "critical": "[Context Posture: CRITICAL] Working memory near ceiling. Offload remaining discovery, log forensics, or isolated subtasks to research/self subagents; keep primary reads rg-anchored and suppress verbose CLI output."
+      }
+    }
+  ]
 }
 ```
+
+`model_profiles` 依陣列順序採 **first-match（不分大小寫子字串比對 `modelName`）** 覆寫，未指定的欄位沿用頂層預設值；支援覆寫 `context_limit`、`thresholds`（`tight`/`critical`）、`messages`（`nominal`/`tight`/`critical`）與 `slice_invariants_enabled`。
 
 ---
 
@@ -99,14 +115,15 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File .\plugins\agy-enhancer\install.ps1
 # 檢視當前載入之配置
 .\plugins\agy-enhancer\bin\agy-enhancer.exe --config
 
-# 探測 Transcript 與代碼不變量
+# 探測 Transcript 與代碼不變量（可選帶入模型名稱）
 .\plugins\agy-enhancer\bin\agy-enhancer.exe --probe "C:\path\to\transcript.jsonl"
+.\plugins\agy-enhancer\bin\agy-enhancer.exe --probe "C:\path\to\transcript.jsonl" "Gemini 4 Hydrogen"
 
 # 探測專案 Memory 狀態
 .\plugins\agy-enhancer\bin\agy-enhancer.exe --memory "."
 
-# 模擬 Token 水位姿態
+# 模擬 Token 水位姿態（預設 / 指定模型）
 .\plugins\agy-enhancer\bin\agy-enhancer.exe --simulate 50000
-.\plugins\agy-enhancer\bin\agy-enhancer.exe --simulate 180000
-.\plugins\agy-enhancer\bin\agy-enhancer.exe --simulate 240000
+.\plugins\agy-enhancer\bin\agy-enhancer.exe --simulate 200000 "Gemini 4 Hydrogen"
+.\plugins\agy-enhancer\bin\agy-enhancer.exe --simulate 270000 "Gemini 4 Hydrogen"
 ```
