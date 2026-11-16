@@ -17,6 +17,7 @@ license: MIT
   * [Karpathy.md](agents/Karpathy.md): 通用 LLM 編碼行為準則（Claude / Karpathy 風格）。
 * **[rules/](rules/)**: 全域與環境硬規則（`trigger: always_on`）。
   * [python_uv.md](rules/python_uv.md): 系統 Python 與 `uv` 工具鏈強制規範。（註：CLI 工具鏈規範已全面整併至 [agy-enhancer](plugins/agy-enhancer/rules/CLI_TOOLCHAIN.md) 旗艦外掛中，避免全域雙重載入）。
+  * [local_cli_inventory.md](rules/local_cli_inventory.md): 本機已安裝 CLI 工具清單與環境慣例總表（`pnpm`、`cargo`、`docker`、`colab`、`gcloud` 等，避免與 `CLI_TOOLCHAIN.md` / `git-agent-flow` / `python_uv.md` 重複）。
 * **[docs/](docs/)**: 設計哲學與架構演進文檔。
   * [GEMINI_DESIGN_RATIONALE.md](docs/GEMINI_DESIGN_RATIONALE.md): **GEMINI.md 設計哲學與架構演進全紀錄**。詳細記錄為何拋棄「防守拘束器」、Context 經濟學、多模態閉環與各極端情境決策邊界，供後續迭代延續理念。
 * **[plugins/](plugins/)**: 外掛整合套件（Antigravity Plugins）。
