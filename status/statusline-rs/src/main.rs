@@ -64,6 +64,7 @@ struct Model {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ModelPool {
     Argon,
+    Carbon,
     Gemini,
     ThirdParty,
 }
@@ -72,6 +73,7 @@ impl ModelPool {
     fn tag(self) -> &'static str {
         match self {
             ModelPool::Argon => "ARG",
+            ModelPool::Carbon => "CRB",
             ModelPool::Gemini => "GEM",
             ModelPool::ThirdParty => "3P",
         }
@@ -80,9 +82,58 @@ impl ModelPool {
     fn color(self) -> &'static str {
         match self {
             ModelPool::Argon => FG_LAVENDER,
+            ModelPool::Carbon => FG_DUSTY_ROSE,
             ModelPool::Gemini => FG_FOG_BLUE,
             ModelPool::ThirdParty => FG_OAT,
         }
+    }
+}
+
+fn classify_preferred_pools(model_id: &str, model_disp: &str) -> [ModelPool; 4] {
+    let id_lower = model_id.to_lowercase();
+    let disp_lower = model_disp.to_lowercase();
+    let has = |needle: &str| id_lower.contains(needle) || disp_lower.contains(needle);
+
+    if has("argon") || has("g1-pro") {
+        [
+            ModelPool::Argon,
+            ModelPool::Gemini,
+            ModelPool::Carbon,
+            ModelPool::ThirdParty,
+        ]
+    } else if has("carbon") {
+        [
+            ModelPool::Carbon,
+            ModelPool::Gemini,
+            ModelPool::Argon,
+            ModelPool::ThirdParty,
+        ]
+    } else if has("gemini")
+        || has("neon")
+        || has("hydrogen")
+        || has("orchestrator")
+        || has("flash")
+    {
+        [
+            ModelPool::Gemini,
+            ModelPool::Argon,
+            ModelPool::Carbon,
+            ModelPool::ThirdParty,
+        ]
+    } else if !id_lower.is_empty() || !disp_lower.is_empty() {
+        [
+            ModelPool::ThirdParty,
+            ModelPool::Gemini,
+            ModelPool::Argon,
+            ModelPool::Carbon,
+        ]
+    } else {
+        [
+            ModelPool::Gemini,
+            ModelPool::Argon,
+            ModelPool::Carbon,
+            ModelPool::ThirdParty,
+        ]
     }
 }
 
@@ -93,84 +144,89 @@ struct Quotas {
 }
 
 impl Quotas {
+    fn find_bucket(
+        &self,
+        exact_keys: &[&str],
+        predicate: impl Fn(&str) -> bool,
+    ) -> Option<&QuotaItem> {
+        for key in exact_keys {
+            if let Some(item) = self.buckets.get(*key) {
+                if item.is_usable() {
+                    return Some(item);
+                }
+            }
+        }
+        let mut keys: Vec<&String> = self.buckets.keys().collect();
+        keys.sort_unstable();
+        for key in keys {
+            let lower = key.to_lowercase();
+            if predicate(&lower) {
+                if let Some(item) = self.buckets.get(key) {
+                    if item.is_usable() {
+                        return Some(item);
+                    }
+                }
+            }
+        }
+        None
+    }
+
     fn get_pool_quotas(&self, pool: ModelPool) -> (Option<&QuotaItem>, Option<&QuotaItem>) {
         match pool {
-            ModelPool::Argon => {
-                let q_5h = self
-                    .buckets
-                    .get("gemini-argon-wtu-5h")
-                    .or_else(|| self.buckets.get("gemini-argon-5h"))
-                    .or_else(|| self.buckets.get("argon-5h"))
-                    .or_else(|| {
-                        self.buckets
-                            .iter()
-                            .find(|(k, _)| k.contains("argon") && k.ends_with("5h"))
-                            .map(|(_, v)| v)
-                    });
-                let q_wk = self
-                    .buckets
-                    .get("gemini-argon-wtu-weekly")
-                    .or_else(|| self.buckets.get("gemini-argon-weekly"))
-                    .or_else(|| self.buckets.get("argon-weekly"))
-                    .or_else(|| {
-                        self.buckets
-                            .iter()
-                            .find(|(k, _)| {
-                                k.contains("argon") && (k.ends_with("weekly") || k.ends_with("7d"))
-                            })
-                            .map(|(_, v)| v)
-                    });
-                (q_5h, q_wk)
-            }
-            ModelPool::Gemini => {
-                let q_5h = self.buckets.get("gemini-5h").or_else(|| {
-                    self.buckets
-                        .iter()
-                        .find(|(k, _)| {
-                            k.starts_with("gemini") && !k.contains("argon") && k.ends_with("5h")
-                        })
-                        .map(|(_, v)| v)
-                });
-                let q_wk = self.buckets.get("gemini-weekly").or_else(|| {
-                    self.buckets
-                        .iter()
-                        .find(|(k, _)| {
-                            k.starts_with("gemini")
-                                && !k.contains("argon")
-                                && (k.ends_with("weekly") || k.ends_with("7d"))
-                        })
-                        .map(|(_, v)| v)
-                });
-                (q_5h, q_wk)
-            }
-            ModelPool::ThirdParty => {
-                let q_5h = self.buckets.get("3p-5h").or_else(|| {
-                    self.buckets
-                        .iter()
-                        .find(|(k, _)| {
-                            !k.contains("gemini") && !k.contains("argon") && k.ends_with("5h")
-                        })
-                        .map(|(_, v)| v)
-                });
-                let q_wk = self.buckets.get("3p-weekly").or_else(|| {
-                    self.buckets
-                        .iter()
-                        .find(|(k, _)| {
-                            !k.contains("gemini")
-                                && !k.contains("argon")
-                                && (k.ends_with("weekly") || k.ends_with("7d"))
-                        })
-                        .map(|(_, v)| v)
-                });
-                (q_5h, q_wk)
-            }
+            ModelPool::Argon => (
+                self.find_bucket(
+                    &["gemini-argon-wtu-5h", "gemini-argon-5h", "argon-5h"],
+                    |k| k.contains("argon") && k.ends_with("5h"),
+                ),
+                self.find_bucket(
+                    &["gemini-argon-wtu-weekly", "gemini-argon-weekly", "argon-weekly"],
+                    |k| k.contains("argon") && (k.ends_with("weekly") || k.ends_with("7d")),
+                ),
+            ),
+            ModelPool::Carbon => (
+                self.find_bucket(
+                    &["gemini-carbon-wtu-5h", "gemini-carbon-5h", "carbon-5h"],
+                    |k| k.contains("carbon") && k.ends_with("5h"),
+                ),
+                self.find_bucket(
+                    &["gemini-carbon-wtu-weekly", "gemini-carbon-weekly", "carbon-weekly"],
+                    |k| k.contains("carbon") && (k.ends_with("weekly") || k.ends_with("7d")),
+                ),
+            ),
+            ModelPool::Gemini => (
+                self.find_bucket(&["gemini-5h"], |k| {
+                    k.starts_with("gemini")
+                        && !k.contains("argon")
+                        && !k.contains("carbon")
+                        && k.ends_with("5h")
+                }),
+                self.find_bucket(&["gemini-weekly"], |k| {
+                    k.starts_with("gemini")
+                        && !k.contains("argon")
+                        && !k.contains("carbon")
+                        && (k.ends_with("weekly") || k.ends_with("7d"))
+                }),
+            ),
+            ModelPool::ThirdParty => (
+                self.find_bucket(&["3p-5h"], |k| {
+                    !k.contains("gemini")
+                        && !k.contains("argon")
+                        && !k.contains("carbon")
+                        && k.ends_with("5h")
+                }),
+                self.find_bucket(&["3p-weekly"], |k| {
+                    !k.contains("gemini")
+                        && !k.contains("argon")
+                        && !k.contains("carbon")
+                        && (k.ends_with("weekly") || k.ends_with("7d"))
+                }),
+            ),
         }
     }
 
     fn has_pool(&self, pool: ModelPool) -> bool {
         let (q_5h, q_wk) = self.get_pool_quotas(pool);
-        q_5h.and_then(|q| q.remaining_fraction).is_some()
-            || q_wk.and_then(|q| q.remaining_fraction).is_some()
+        q_5h.is_some_and(QuotaItem::is_usable) || q_wk.is_some_and(QuotaItem::is_usable)
     }
 }
 
@@ -178,6 +234,13 @@ impl Quotas {
 struct QuotaItem {
     remaining_fraction: Option<f64>,
     reset_in_seconds: Option<i64>,
+    disabled: Option<bool>,
+}
+
+impl QuotaItem {
+    fn is_usable(&self) -> bool {
+        self.disabled != Some(true) && self.remaining_fraction.is_some()
+    }
 }
 
 // ─── Logger ──────────────────────────────────────────────────────────────────
@@ -216,7 +279,7 @@ fn read_stdin_safely() -> String {
 
         unsafe {
             let h_stdin = GetStdHandle(STD_INPUT_HANDLE);
-            if h_stdin != std::ptr::null_mut() && h_stdin != -1isize as _ {
+            if !h_stdin.is_null() && h_stdin != -1isize as _ {
                 let mut avail: u32 = 0;
                 let mut got_bytes = false;
                 for _ in 0..12 {
@@ -320,13 +383,11 @@ fn get_power_status() -> Option<PowerInfo> {
         use windows_sys::Win32::System::Power::{GetSystemPowerStatus, SYSTEM_POWER_STATUS};
         unsafe {
             let mut status: SYSTEM_POWER_STATUS = std::mem::zeroed();
-            if GetSystemPowerStatus(&mut status) != 0 {
-                if status.BatteryLifePercent <= 100 {
-                    return Some(PowerInfo {
-                        percent: status.BatteryLifePercent,
-                        is_ac: status.ACLineStatus == 1,
-                    });
-                }
+            if GetSystemPowerStatus(&mut status) != 0 && status.BatteryLifePercent <= 100 {
+                return Some(PowerInfo {
+                    percent: status.BatteryLifePercent,
+                    is_ac: status.ACLineStatus == 1,
+                });
             }
         }
     }
@@ -409,6 +470,85 @@ fn truncate_string(s: &str, max_len: usize) -> String {
     }
     let prefix: String = chars.iter().take(max_len - 3).collect();
     format!("{}...", prefix)
+}
+
+fn format_effort_label(effort: &str) -> String {
+    let trimmed = effort.trim();
+    match trimmed.to_lowercase().as_str() {
+        "low" => "Low".to_string(),
+        "medium" => "Medium".to_string(),
+        "high" => "High".to_string(),
+        "xhigh" | "extra_high" | "extra-high" => "XHigh".to_string(),
+        "max" => "Max".to_string(),
+        "extra" => "Extra".to_string(),
+        _ => {
+            let mut chars = trimmed.chars();
+            match chars.next() {
+                Some(first) => format!("{}{}", first.to_uppercase(), chars.as_str()),
+                None => String::new(),
+            }
+        }
+    }
+}
+
+fn has_effort_in_display(disp_lower: &str, effort_lower: &str) -> bool {
+    disp_lower.contains(effort_lower)
+        || (matches!(effort_lower, "xhigh" | "extra_high" | "extra-high")
+            && (disp_lower.contains("(extra)")
+                || disp_lower.contains("extra high")
+                || disp_lower.contains("xhigh")))
+}
+
+fn format_model_name(display_name: &str, effort: &str, max_len: usize) -> String {
+    let display_trimmed = display_name.trim();
+    let effort_trimmed = effort.trim();
+    if display_trimmed.is_empty() {
+        return String::new();
+    }
+
+    let disp_lower = display_trimmed.to_lowercase();
+    let effort_lower = effort_trimmed.to_lowercase();
+    let mut candidate = if !effort_trimmed.is_empty() && !has_effort_in_display(&disp_lower, &effort_lower) {
+        format!("{} ({})", display_trimmed, format_effort_label(effort_trimmed))
+    } else {
+        display_trimmed.to_string()
+    };
+
+    if candidate.chars().count() <= max_len {
+        return candidate;
+    }
+
+    if candidate.contains(" (Medium)") {
+        candidate = candidate.replacen(" (Medium)", " (Med)", 1);
+    } else if candidate.contains(" (medium)") {
+        candidate = candidate.replacen(" (medium)", " (Med)", 1);
+    }
+    if candidate.chars().count() <= max_len {
+        return candidate;
+    }
+
+    if let Some(rest) = candidate.strip_prefix("Orchestrator ") {
+        candidate = format!("Orch {}", rest);
+    } else if let Some(rest) = candidate.strip_prefix("Gemini ") {
+        candidate = format!("Gem {}", rest);
+    }
+    if candidate.chars().count() <= max_len {
+        return candidate;
+    }
+
+    if candidate.ends_with(')') {
+        if let Some(idx) = candidate.rfind(" (") {
+            let suffix = &candidate[idx..];
+            let suffix_len = suffix.chars().count();
+            let base = &candidate[..idx];
+            let base_budget = max_len.saturating_sub(suffix_len);
+            if base_budget >= 9 {
+                return format!("{}{}", truncate_string(base, base_budget), suffix);
+            }
+        }
+    }
+
+    truncate_string(&candidate, max_len)
 }
 
 fn visible_len(s: &str) -> usize {
@@ -693,6 +833,7 @@ fn build_context_bar(used_pct: f64, classic: bool) -> String {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn build_quota_bar(
     val: f64,
     pool_badge: Option<(&str, &str)>,
@@ -823,13 +964,14 @@ fn main() {
 
     // Check legend flag
     if args.iter().any(|a| a == "--legend" || a == "-l" || a == "legend") {
-        println!("Antigravity Statusline Legend");
+        println!("Antigravity Statusline v{} Legend", env!("CARGO_PKG_VERSION"));
         println!("READY           Agent is idle");
         println!("THINKING        Agent is reasoning");
         println!("WORKING         Agent is executing");
         println!("TOOL            Tool call is active");
+        println!("REVIEW / ERROR  Agent awaiting review or encountered an error");
         println!("CTX             Context window usage");
-        println!("GEM / ARG / 3P  Model pool category (Gemini / Argon / Claude & GPT)");
+        println!("GEM/ARG/CRB/3P  Model pool category (Gemini / Argon / Carbon / Claude & GPT)");
         println!("5H / 7D         Quota remaining and cooldown reset timer");
         println!("SES             Current conversation session ID");
         return;
@@ -873,7 +1015,7 @@ fn main() {
     let (max_user_len, max_model_len, max_branch_len): (usize, usize, usize) = if cols < 65 {
         (12, 14, 14)
     } else if cols < 85 {
-        (18, 20, 20)
+        (18, 22, 18)
     } else if cols < 110 {
         (24, 28, 25)
     } else {
@@ -887,6 +1029,10 @@ fn main() {
         "thinking" => if use_classic { "◆" } else { "󰟷" },
         "working" => if use_classic { "⚙" } else { "" },
         "tool_use" => if use_classic { "🔧" } else { "" },
+        "reviewing" => if use_classic { "◈" } else { "󰍉" },
+        "error" => if use_classic { "!" } else { "󰅚" },
+        "authenticating" => if use_classic { "…" } else { "󰌆" },
+        "initializing" => if use_classic { "…" } else { "󰑐" },
         _ => if use_classic { "⏳" } else { "" },
     };
 
@@ -895,6 +1041,10 @@ fn main() {
         "thinking" => format!("{}{}{} THINKING{}", FG_OAT, B, state_icon, R),
         "working" => format!("{}{}{} WORKING{}", FG_FOG_BLUE, B, state_icon, R),
         "tool_use" => format!("{}{}{} TOOL{}", FG_DUSTY_ROSE, B, state_icon, R),
+        "reviewing" => format!("{}{}{} REVIEW{}", FG_LAVENDER, B, state_icon, R),
+        "error" => format!("{}{}{} ERROR{}", FG_TERRACOTTA, B, state_icon, R),
+        "authenticating" => format!("{}{}{} AUTH{}", FG_OAT, B, state_icon, R),
+        "initializing" => format!("{}{}{} INIT{}", FG_MUTED_CYAN, B, state_icon, R),
         s => format!("{}{}{} {}{}", FG_BRIGHT_WHITE, B, state_icon, s.to_uppercase(), R),
     };
 
@@ -914,25 +1064,25 @@ fn main() {
     };
 
     // Model
+    let model_id = payload
+        .model
+        .as_ref()
+        .and_then(|m| m.id.as_deref())
+        .unwrap_or("");
     let model_disp = payload
         .model
         .as_ref()
         .and_then(|m| m.display_name.clone().or_else(|| m.id.clone()))
         .unwrap_or_default();
-    let model_effort = payload.model.as_ref().and_then(|m| m.effort.clone()).unwrap_or_default();
-    let model_fmt = if !model_disp.is_empty() {
-        let disp = if !model_effort.is_empty() && !model_disp.to_lowercase().contains(&model_effort.to_lowercase()) {
-            let cap_effort = format!(" ({})", model_effort);
-            format!(
-                "{}{}",
-                truncate_string(&model_disp, max_model_len.saturating_sub(cap_effort.len()).max(1)),
-                cap_effort
-            )
-        } else {
-            truncate_string(&model_disp, max_model_len)
-        };
+    let model_effort = payload
+        .model
+        .as_ref()
+        .and_then(|m| m.effort.as_deref())
+        .unwrap_or("");
+    let disp_formatted = format_model_name(&model_disp, model_effort, max_model_len);
+    let model_fmt = if !disp_formatted.is_empty() {
         let icon_model = if use_classic { "" } else { " " };
-        format!("{}{}{}{}{}{}", dot_l1, FG_LAVENDER, icon_model, disp, R, "")
+        format!("{}{}{}{}{}", dot_l1, FG_LAVENDER, icon_model, disp_formatted, R)
     } else {
         String::new()
     };
@@ -1010,24 +1160,8 @@ fn main() {
         String::new()
     };
 
-    // Quotas (Classified by Model Pool: Argon / Gemini / 3P)
-    let model_id_lower = payload
-        .model
-        .as_ref()
-        .and_then(|m| m.id.as_deref())
-        .unwrap_or("")
-        .to_lowercase();
-    let model_disp_lower = model_disp.to_lowercase();
-
-    let preferred_pools = if model_id_lower.contains("argon") || model_disp_lower.contains("argon") {
-        [ModelPool::Argon, ModelPool::Gemini, ModelPool::ThirdParty]
-    } else if model_id_lower.contains("gemini") || model_disp_lower.contains("gemini") {
-        [ModelPool::Gemini, ModelPool::Argon, ModelPool::ThirdParty]
-    } else if !model_id_lower.is_empty() || !model_disp_lower.is_empty() {
-        [ModelPool::ThirdParty, ModelPool::Gemini, ModelPool::Argon]
-    } else {
-        [ModelPool::Gemini, ModelPool::Argon, ModelPool::ThirdParty]
-    };
+    // Quotas (Classified by Model Pool: Argon / Carbon / Gemini / 3P)
+    let preferred_pools = classify_preferred_pools(model_id, &model_disp);
 
     let active_pool = payload.quota.as_ref().and_then(|q| {
         preferred_pools
@@ -1217,4 +1351,298 @@ fn main() {
     let row3 = format_flex_wrap_line(&l3_left, &l3_right, width, &dot_l2).join("\n");
 
     println!("{}\n{}\n{}\n{}\n{}", top_border, row1, row2, row3, bot_border);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashMap;
+
+    fn q_item(frac: f64, reset: i64) -> QuotaItem {
+        QuotaItem {
+            remaining_fraction: Some(frac),
+            reset_in_seconds: Some(reset),
+            disabled: None,
+        }
+    }
+
+    fn q_disabled(frac: f64) -> QuotaItem {
+        QuotaItem {
+            remaining_fraction: Some(frac),
+            reset_in_seconds: Some(100),
+            disabled: Some(true),
+        }
+    }
+
+    #[test]
+    fn test_classify_preferred_pools() {
+        assert_eq!(
+            classify_preferred_pools("Orchestrator (Neon)", "Orchestrator (Neon)"),
+            [
+                ModelPool::Gemini,
+                ModelPool::Argon,
+                ModelPool::Carbon,
+                ModelPool::ThirdParty
+            ]
+        );
+        assert_eq!(
+            classify_preferred_pools("gemini-pro-orchestrator-neon", ""),
+            [
+                ModelPool::Gemini,
+                ModelPool::Argon,
+                ModelPool::Carbon,
+                ModelPool::ThirdParty
+            ]
+        );
+        assert_eq!(
+            classify_preferred_pools("Orchestrator (Argon)", "Orchestrator (Argon)"),
+            [
+                ModelPool::Argon,
+                ModelPool::Gemini,
+                ModelPool::Carbon,
+                ModelPool::ThirdParty
+            ]
+        );
+        assert_eq!(
+            classify_preferred_pools("gemini-pro-orchestrator-g1-pro", ""),
+            [
+                ModelPool::Argon,
+                ModelPool::Gemini,
+                ModelPool::Carbon,
+                ModelPool::ThirdParty
+            ]
+        );
+        assert_eq!(
+            classify_preferred_pools("Orchestrator (Carbon)", "Orchestrator (Carbon)"),
+            [
+                ModelPool::Carbon,
+                ModelPool::Gemini,
+                ModelPool::Argon,
+                ModelPool::ThirdParty
+            ]
+        );
+        assert_eq!(
+            classify_preferred_pools("gemini-4-neon-xhigh", "Gemini 4 Neon (XHigh)"),
+            [
+                ModelPool::Gemini,
+                ModelPool::Argon,
+                ModelPool::Carbon,
+                ModelPool::ThirdParty
+            ]
+        );
+        assert_eq!(
+            classify_preferred_pools("gemini-4-hydrogen-xhigh", "Gemini 4 Hydrogen (XHigh)"),
+            [
+                ModelPool::Gemini,
+                ModelPool::Argon,
+                ModelPool::Carbon,
+                ModelPool::ThirdParty
+            ]
+        );
+        assert_eq!(
+            classify_preferred_pools("gemini-4-argon-high", "Gemini 4 Argon (High)"),
+            [
+                ModelPool::Argon,
+                ModelPool::Gemini,
+                ModelPool::Carbon,
+                ModelPool::ThirdParty
+            ]
+        );
+        assert_eq!(
+            classify_preferred_pools("gemini-4-carbon-high", "Gemini 4 Carbon (High)"),
+            [
+                ModelPool::Carbon,
+                ModelPool::Gemini,
+                ModelPool::Argon,
+                ModelPool::ThirdParty
+            ]
+        );
+        assert_eq!(
+            classify_preferred_pools("gemini-3.8-flash-high", "Gemini 3.8 Flash (High)"),
+            [
+                ModelPool::Gemini,
+                ModelPool::Argon,
+                ModelPool::Carbon,
+                ModelPool::ThirdParty
+            ]
+        );
+        assert_eq!(
+            classify_preferred_pools("claude-opus-5-5-high", "Claude Opus 5.5 (High)"),
+            [
+                ModelPool::ThirdParty,
+                ModelPool::Gemini,
+                ModelPool::Argon,
+                ModelPool::Carbon
+            ]
+        );
+        assert_eq!(
+            classify_preferred_pools("claude-sonnet-5-5-medium", "Claude Sonnet 5.5 (Medium)"),
+            [
+                ModelPool::ThirdParty,
+                ModelPool::Gemini,
+                ModelPool::Argon,
+                ModelPool::Carbon
+            ]
+        );
+        assert_eq!(
+            classify_preferred_pools("gpt-oss-120b-medium", "GPT-OSS 120B (Medium)"),
+            [
+                ModelPool::ThirdParty,
+                ModelPool::Gemini,
+                ModelPool::Argon,
+                ModelPool::Carbon
+            ]
+        );
+        assert_eq!(
+            classify_preferred_pools("Orchestrator (Krypton)", "Orchestrator (Krypton)"),
+            [
+                ModelPool::Gemini,
+                ModelPool::Argon,
+                ModelPool::Carbon,
+                ModelPool::ThirdParty
+            ]
+        );
+        assert_eq!(
+            classify_preferred_pools("", ""),
+            [
+                ModelPool::Gemini,
+                ModelPool::Argon,
+                ModelPool::Carbon,
+                ModelPool::ThirdParty
+            ]
+        );
+    }
+
+    #[test]
+    fn test_quota_pool_resolution_and_disabled() {
+        let mut buckets = HashMap::new();
+        buckets.insert("gemini-5h".to_string(), q_item(0.80, 14000));
+        buckets.insert("gemini-weekly".to_string(), q_item(0.92, 439200));
+        buckets.insert("3p-5h".to_string(), q_item(1.0, 18000));
+        buckets.insert("3p-weekly".to_string(), q_item(1.0, 604800));
+        buckets.insert("gemini-argon-wtu-weekly".to_string(), q_item(0.99, 439200));
+        let quotas = Quotas { buckets };
+
+        // Neon Orchestrator resolves to Gemini pool
+        let neon_prefs = classify_preferred_pools("Orchestrator (Neon)", "Orchestrator (Neon)");
+        let neon_pool = neon_prefs.iter().copied().find(|&p| quotas.has_pool(p));
+        assert_eq!(neon_pool, Some(ModelPool::Gemini));
+
+        // Carbon without dedicated bucket falls back to Gemini pool
+        let carbon_prefs =
+            classify_preferred_pools("Orchestrator (Carbon)", "Orchestrator (Carbon)");
+        let carbon_pool = carbon_prefs.iter().copied().find(|&p| quotas.has_pool(p));
+        assert_eq!(carbon_pool, Some(ModelPool::Gemini));
+
+        // Argon resolves to Argon pool
+        let argon_prefs =
+            classify_preferred_pools("gemini-pro-orchestrator-g1-pro", "Orchestrator (Argon)");
+        let argon_pool = argon_prefs.iter().copied().find(|&p| quotas.has_pool(p));
+        assert_eq!(argon_pool, Some(ModelPool::Argon));
+
+        // Carbon with dedicated bucket resolves to Carbon, and Gemini still ignores carbon/argon
+        let mut carbon_buckets = HashMap::new();
+        carbon_buckets.insert("gemini-carbon-wtu-weekly".to_string(), q_item(0.55, 200000));
+        carbon_buckets.insert("gemini-argon-wtu-weekly".to_string(), q_item(0.99, 439200));
+        carbon_buckets.insert("gemini-custom-5h".to_string(), q_item(0.75, 10000));
+        let quotas_carbon = Quotas {
+            buckets: carbon_buckets,
+        };
+        assert_eq!(
+            carbon_prefs
+                .iter()
+                .copied()
+                .find(|&p| quotas_carbon.has_pool(p)),
+            Some(ModelPool::Carbon)
+        );
+        let (gem_5h, gem_wk) = quotas_carbon.get_pool_quotas(ModelPool::Gemini);
+        assert_eq!(gem_5h.and_then(|q| q.remaining_fraction), Some(0.75));
+        assert!(gem_wk.is_none());
+
+        // Ultra plan: Argon absent -> falls back to Gemini
+        let mut ultra_buckets = HashMap::new();
+        ultra_buckets.insert("gemini-5h".to_string(), q_item(0.88, 10000));
+        ultra_buckets.insert("gemini-weekly".to_string(), q_item(0.95, 300000));
+        let quotas_ultra = Quotas {
+            buckets: ultra_buckets,
+        };
+        assert_eq!(
+            argon_prefs
+                .iter()
+                .copied()
+                .find(|&p| quotas_ultra.has_pool(p)),
+            Some(ModelPool::Gemini)
+        );
+
+        // Disabled bucket is skipped
+        let mut disabled_buckets = HashMap::new();
+        disabled_buckets.insert("gemini-5h".to_string(), q_disabled(0.10));
+        disabled_buckets.insert("gemini-weekly".to_string(), q_disabled(0.20));
+        disabled_buckets.insert("3p-5h".to_string(), q_item(1.0, 18000));
+        let quotas_dis = Quotas {
+            buckets: disabled_buckets,
+        };
+        assert!(!quotas_dis.has_pool(ModelPool::Gemini));
+        assert_eq!(
+            neon_prefs.iter().copied().find(|&p| quotas_dis.has_pool(p)),
+            Some(ModelPool::ThirdParty)
+        );
+    }
+
+    #[test]
+    fn test_format_model_name_compaction_and_effort() {
+        // Deduplication and capitalization
+        assert_eq!(
+            format_model_name("Gemini 4 Hydrogen (XHigh)", "xhigh", 28),
+            "Gemini 4 Hydrogen (XHigh)"
+        );
+        assert_eq!(
+            format_model_name("Gemini 4 Hydrogen (Extra)", "xhigh", 28),
+            "Gemini 4 Hydrogen (Extra)"
+        );
+        assert_eq!(
+            format_model_name("Gemini 4 Hydrogen", "xhigh", 28),
+            "Gemini 4 Hydrogen (XHigh)"
+        );
+        assert_eq!(
+            format_model_name("Orchestrator (Neon)", "", 28),
+            "Orchestrator (Neon)"
+        );
+
+        // Medium width (cols = 80 -> max_model_len = 22)
+        assert_eq!(
+            format_model_name("Gemini 4 Hydrogen (XHigh)", "xhigh", 22),
+            "Gem 4 Hydrogen (XHigh)"
+        );
+        assert_eq!(
+            format_model_name("Gemini 4 Neon (XHigh)", "xhigh", 22),
+            "Gemini 4 Neon (XHigh)"
+        );
+        assert_eq!(
+            format_model_name("Orchestrator (Carbon)", "", 22),
+            "Orchestrator (Carbon)"
+        );
+        assert_eq!(
+            format_model_name("Claude Sonnet 5.5 (High)", "high", 22),
+            "Claude Sonne... (High)"
+        );
+        assert_eq!(
+            format_model_name("Claude Opus 5.5 (Medium)", "medium", 22),
+            "Claude Opus 5.5 (Med)"
+        );
+
+        // Narrow width (cols < 65 -> max_model_len = 14)
+        assert_eq!(
+            format_model_name("Orchestrator (Neon)", "", 14),
+            "Orch (Neon)"
+        );
+        assert_eq!(
+            format_model_name("Orchestrator (Carbon)", "", 14),
+            "Orch (Carbon)"
+        );
+        assert_eq!(
+            format_model_name("Gemini 4 Hydrogen (XHigh)", "xhigh", 14),
+            "Gem 4 Hydro..."
+        );
+    }
 }
