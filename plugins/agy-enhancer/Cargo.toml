@@ -1,6 +1,6 @@
 [package]
 name = "agy-enhancer"
-version = "0.2.0"
+version = "0.3.0"
 description = "Agent-Native Runtime Enhancer Core: Context Posture Governance, Epistemic Memory Radar & PreToolUse Self-Healing"
 edition = "2021"
 

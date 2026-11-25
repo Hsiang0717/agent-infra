@@ -28,6 +28,11 @@ struct HookInput {
     workspace_paths: Option<Vec<String>>,
     #[serde(rename = "invocationNum")]
     invocation_num: Option<u64>,
+    #[serde(rename = "initialNumSteps")]
+    initial_num_steps: Option<u64>,
+    #[serde(rename = "hookEventName")]
+    hook_event_name: Option<String>,
+    cwd: Option<String>,
 }
 
 #[derive(Serialize, Debug)]
@@ -37,27 +42,90 @@ struct HookOutput {
 }
 
 #[derive(Serialize, Debug)]
+struct SystemMessagePayload {
+    #[serde(rename = "systemMessage")]
+    system_message: String,
+}
+
+#[derive(Serialize, Debug)]
 struct InjectStep {
-    #[serde(rename = "ephemeralMessage")]
-    ephemeral_message: String,
+    #[serde(rename = "systemMessage")]
+    system_message: SystemMessagePayload,
+}
+
+fn build_hook_output(message: String) -> HookOutput {
+    HookOutput {
+        inject_steps: vec![InjectStep {
+            system_message: SystemMessagePayload {
+                system_message: message,
+            },
+        }],
+    }
+}
+
+fn resolve_workspace_root(input: &HookInput) -> Option<&Path> {
+    input
+        .workspace_paths
+        .as_ref()
+        .and_then(|v| v.first())
+        .filter(|s| !s.is_empty())
+        .map(Path::new)
+        .or_else(|| input.cwd.as_deref().filter(|s| !s.is_empty()).map(Path::new))
+}
+
+fn emit_hook_message(message: String) {
+    let output = build_hook_output(message);
+    if let Ok(json_str) = serde_json::to_string(&output) {
+        println!("{}", json_str);
+    } else {
+        emit_empty_response();
+    }
+}
+
+fn should_run_pre_invocation_memory_fallback(input: &HookInput) -> bool {
+    // invocationNum resets to 1 on each new user turn; gate by initialNumSteps <= 2
+    // so legacy fallback only triggers on the opening turn of a brand-new session.
+    input.invocation_num.unwrap_or(0) <= 1 && input.initial_num_steps.unwrap_or(0) <= 2
+}
+
+fn handle_session_start(input: &HookInput) {
+    let ws_root = resolve_workspace_root(input);
+    let (base_cfg, _) = load_config(ws_root);
+    let cfg = base_cfg.resolve_for_model(input.model_name.as_deref());
+
+    if cfg.memory_radar.enabled {
+        if let Some(mem_hint) = probe_project_memory_with_config(ws_root, &cfg.memory_radar) {
+            if !mem_hint.trim().is_empty() {
+                emit_hook_message(mem_hint);
+                return;
+            }
+        }
+    }
+
+    emit_empty_response();
 }
 
 // ─── Main Entry Point ────────────────────────────────────────────────────────
 
 fn main() {
     let args: Vec<String> = env::args().collect();
+    let mut force_session_start = false;
 
     if args.len() > 1 {
         let cmd = &args[1];
         match cmd.as_str() {
+            "--session-start" => {
+                force_session_start = true;
+            }
             "--pre-edit" => {
                 handle_pre_edit_hook(args.get(2).map(|s| s.as_str()));
                 return;
             }
             "--help" | "-h" => {
-                println!("agy-enhancer v0.2.0 (Agent-Native Runtime Enhancer Core)");
+                println!("agy-enhancer v0.3.0 (Agent-Native Runtime Enhancer Core)");
                 println!("Usage:");
                 println!("  agy-enhancer                   Run as PreInvocation hook (reads stdin)");
+                println!("  agy-enhancer --session-start   Run as SessionStart hook (reads stdin, emits memory radar once)");
                 println!("  agy-enhancer --pre-edit        Run as PreToolUse edit_file auto-sanitizer/normalizer");
                 println!("  agy-enhancer --config          Print currently resolved configuration");
                 println!("  agy-enhancer --probe <file> [model]   Probe token counts and invariants from transcript file");
@@ -67,7 +135,7 @@ fn main() {
                 return;
             }
             "--version" | "-v" => {
-                println!("agy-enhancer 0.2.0");
+                println!("agy-enhancer 0.3.0");
                 return;
             }
             "--config" => {
@@ -162,6 +230,11 @@ fn main() {
         }
     };
 
+    if force_session_start || input.hook_event_name.as_deref() == Some("SessionStart") {
+        handle_session_start(&input);
+        return;
+    }
+
     let transcript_path = match input.transcript_path.as_deref() {
         Some(p) if !p.is_empty() => Path::new(p),
         _ => {
@@ -170,11 +243,7 @@ fn main() {
         }
     };
 
-    let ws_root = input
-        .workspace_paths
-        .as_ref()
-        .and_then(|v| v.first())
-        .map(Path::new);
+    let ws_root = resolve_workspace_root(&input);
 
     let (base_cfg, _) = load_config(ws_root);
     let cfg = base_cfg.resolve_for_model(input.model_name.as_deref());
@@ -208,12 +277,15 @@ fn main() {
         }
     }
 
-    if cfg.memory_radar.enabled {
-        if !has_recent_ephemeral_marker(transcript_path, "[Project Memory:", None) {
-            if let Some(mem_hint) = probe_project_memory_with_config(ws_root, &cfg.memory_radar) {
-                if !mem_hint.trim().is_empty() {
-                    parts.push(mem_hint);
-                }
+    // SessionStart handles normal memory radar awakening once per session.
+    // Keep a first-session-turn-only fallback for legacy hooks.json setups without SessionStart.
+    if cfg.memory_radar.enabled
+        && should_run_pre_invocation_memory_fallback(&input)
+        && !has_recent_ephemeral_marker(transcript_path, "[Project Memory:", None)
+    {
+        if let Some(mem_hint) = probe_project_memory_with_config(ws_root, &cfg.memory_radar) {
+            if !mem_hint.trim().is_empty() {
+                parts.push(mem_hint);
             }
         }
     }
@@ -223,19 +295,7 @@ fn main() {
         return;
     }
 
-    let message = parts.join(" ");
-
-    let output = HookOutput {
-        inject_steps: vec![InjectStep {
-            ephemeral_message: message,
-        }],
-    };
-
-    if let Ok(json_str) = serde_json::to_string(&output) {
-        println!("{}", json_str);
-    } else {
-        emit_empty_response();
-    }
+    emit_hook_message(parts.join(" "));
 }
 
 fn emit_empty_response() {
@@ -530,11 +590,67 @@ mod tests {
         let hint = probe_recent_read_invariants(&test_file).expect("Should merge parallel read_file invariants");
         assert!(hint.contains(r"tab (\t) indent"));
 
-        // Should detect recent [Project Memory: marker in the 64KB chunk
+        // Should detect recent [Project Memory: marker in the 64KB chunk (both EPHEMERAL_MESSAGE & SYSTEM_MESSAGE)
         assert!(has_recent_ephemeral_marker(&test_file, "[Project Memory:", None));
         assert!(!has_recent_ephemeral_marker(&test_file, "[Context Posture: CRITICAL]", Some(5)));
 
+        let sys_msg_file = temp_dir.join(format!("test_sys_msg_{}.jsonl", std::process::id()));
+        let sys_lines = r#"{"type":"USER_INPUT","content":"check files"}
+{"type":"SYSTEM_MESSAGE","content":{"systemMessage":"[Project Memory: active (.agents/memory/pitfalls.md - 5 entries; query via rg)]"}}
+{"type":"PLANNER_RESPONSE","input_tokens":1000,"output_tokens":100}
+{"type":"GENERIC","content":"Showing lines 1-2 of 10\n1:\tfunc main() {\n2:\t\treturn\n"}
+{"type":"SYSTEM_MESSAGE","content":"[Context Posture: TIGHT]"}
+"#;
+        {
+            let mut f = File::create(&sys_msg_file).unwrap();
+            f.write_all(sys_lines.as_bytes()).unwrap();
+        }
+
+        // SYSTEM_MESSAGE should be skipped during recent read_file invariant scanning
+        let sys_inv = probe_recent_read_invariants(&sys_msg_file).expect("Should skip SYSTEM_MESSAGE to find read_file");
+        assert!(sys_inv.contains(r"tab (\t) indent"));
+        // Cooldown detector must match both string and object SYSTEM_MESSAGE forms
+        assert!(has_recent_ephemeral_marker(&sys_msg_file, "[Project Memory:", None));
+        assert!(has_recent_ephemeral_marker(&sys_msg_file, "[Context Posture: TIGHT]", Some(5)));
+
         let _ = std::fs::remove_file(&test_file);
+        let _ = std::fs::remove_file(&sys_msg_file);
+    }
+
+    #[test]
+    fn test_hook_output_uses_system_message_contract() {
+        let out = build_hook_output("[Project Memory: active]".to_string());
+        let json = serde_json::to_string(&out).expect("HookOutput should serialize");
+        assert_eq!(
+            json,
+            r#"{"injectSteps":[{"systemMessage":{"systemMessage":"[Project Memory: active]"}}]}"#
+        );
+        assert!(!json.contains("ephemeralMessage"));
+    }
+
+    #[test]
+    fn test_pre_invocation_memory_fallback_gated_to_first_session_turn() {
+        let opening_turn = HookInput {
+            invocation_num: Some(1),
+            initial_num_steps: Some(1),
+            ..Default::default()
+        };
+        assert!(should_run_pre_invocation_memory_fallback(&opening_turn));
+
+        // Subsequent user turns reset invocationNum=1, but initialNumSteps grows
+        let later_user_turn = HookInput {
+            invocation_num: Some(1),
+            initial_num_steps: Some(42),
+            ..Default::default()
+        };
+        assert!(!should_run_pre_invocation_memory_fallback(&later_user_turn));
+
+        let mid_turn = HookInput {
+            invocation_num: Some(2),
+            initial_num_steps: Some(1),
+            ..Default::default()
+        };
+        assert!(!should_run_pre_invocation_memory_fallback(&mid_turn));
     }
 
     #[test]
@@ -571,6 +687,23 @@ mod tests {
         assert_eq!(default_resolved.context_limit, 200_000);
         assert!(build_semantic_message(180_000, &default_resolved).contains("CRITICAL"));
 
+        // Orchestrator precedes Neon/Carbon so "Orchestrator (Neon)" resolves to orchestrator (350k)
+        let orch_resolved = base_cfg.resolve_for_model(Some("Orchestrator (Neon)"));
+        assert_eq!(orch_resolved.context_limit, 350_000);
+        assert!(build_semantic_message(200_000, &orch_resolved).is_empty());
+        assert!(build_semantic_message(235_000, &orch_resolved).contains("TIGHT"));
+
+        // Neon resolves to 400k calibrated posture
+        let neon_resolved = base_cfg.resolve_for_model(Some("Gemini 4 Neon (High)"));
+        assert_eq!(neon_resolved.context_limit, 400_000);
+        assert!(build_semantic_message(240_000, &neon_resolved).is_empty());
+        assert!(build_semantic_message(270_000, &neon_resolved).contains("TIGHT"));
+        assert!(build_semantic_message(360_000, &neon_resolved).contains("CRITICAL"));
+
+        // Carbon resolves to 350k calibrated posture
+        let carbon_resolved = base_cfg.resolve_for_model(Some("Gemini 4 Carbon (High)"));
+        assert_eq!(carbon_resolved.context_limit, 350_000);
+
         // Hydrogen model matches case-insensitively and shifts to calibrated 300k posture
         let hydrogen_resolved = base_cfg.resolve_for_model(Some("Gemini 4 Hydrogen (High)"));
         assert_eq!(hydrogen_resolved.context_limit, 300_000);
@@ -583,5 +716,10 @@ mod tests {
         // Unoverridden fields remain intact
         assert!(hydrogen_resolved.memory_radar.enabled);
         assert!(hydrogen_resolved.slice_invariants.enabled);
+
+        // Claude 5.5 resolves to 300k / 0.65 / 0.85
+        let claude_resolved = base_cfg.resolve_for_model(Some("Claude Opus 5.5 (High)"));
+        assert_eq!(claude_resolved.context_limit, 300_000);
+        assert!(build_semantic_message(260_000, &claude_resolved).contains("CRITICAL"));
     }
 }

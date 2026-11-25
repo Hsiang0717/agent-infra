@@ -5,9 +5,9 @@ description: "Enforce Windows pwsh environment, agent-native CLI tools (rg, fd, 
 
 # CLI Toolchain & Agent-Native Environment Protocol
 
-- **Operating System & Shell:**
-  - The runtime environment is Windows with PowerShell 7 (`pwsh`).
-  - Always use PowerShell syntax: `$env:VAR = "value"`, `Get-Command` (never Bash idioms like `export` or `which`).
+- **Operating System & Shell (Local Windows Scope):**
+  - For local Windows sessions, the runtime shell is PowerShell 7 (`pwsh`): always use PowerShell syntax (`$env:VAR = "value"`, `Get-Command`), never Bash idioms (`export`, `which`).
+  - If running inside a remote/Linux session (e.g., `agy --remote-agent`), adapt to native POSIX shell syntax while keeping the native-tool boundaries (`rg`, `fd`, `jq`, `read_file`) below.
 
 - **Shell Command Boundaries (Native Tools First):**
   - **Directory & File Discovery:** Use `lsj [path]`, `topj [count] [path]`, or `fd [pattern]`. Never run raw shell listing commands (`Get-ChildItem`, `dir`, `ls`, `tree`).

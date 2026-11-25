@@ -6,8 +6,8 @@
   },
   "messages": {
     "nominal": "",
-    "tight": "[Context Posture: TIGHT] Avoid blind full-file dumps (use outline/rg; offload broad cross-file audits to research subagent). If a fix failed or spans modules, do NOT repeat local tweaks—trace paired channels & align Where/Who/When first.",
-    "critical": "[Context Posture: CRITICAL] Working memory near ceiling. Offload remaining discovery, log forensics, or isolated subtasks to research/self subagents; keep primary reads strictly rg-anchored, suppress verbose CLI output, and converge directly on verified completion."
+    "tight": "[Context Posture: TIGHT] Protect working memory: use outline/rg slices, delegate broad audits to research subagent or run_workflow, and trace causal chains rather than repeating local edits.",
+    "critical": "[Context Posture: CRITICAL] Working memory near ceiling. Offload remaining discovery, log forensics, or bulk fan-out to research/self subagents or run_workflow; keep primary reads rg-anchored and suppress verbose CLI output."
   },
   "memory_radar": {
     "enabled": true,
@@ -21,15 +21,43 @@
   },
   "model_profiles": [
     {
+      "match_pattern": "orchestrator",
+      "context_limit": 350000,
+      "thresholds": {
+        "tight": 0.65,
+        "critical": 0.88
+      }
+    },
+    {
+      "match_pattern": "neon",
+      "context_limit": 400000,
+      "thresholds": {
+        "tight": 0.65,
+        "critical": 0.88
+      }
+    },
+    {
+      "match_pattern": "carbon",
+      "context_limit": 350000,
+      "thresholds": {
+        "tight": 0.65,
+        "critical": 0.88
+      }
+    },
+    {
       "match_pattern": "hydrogen",
       "context_limit": 300000,
       "thresholds": {
         "tight": 0.65,
         "critical": 0.88
-      },
-      "messages": {
-        "tight": "[Context Posture: TIGHT] Protect working memory: use outline/rg slices, delegate broad audits to research subagent, and trace causal chains rather than repeating local edits.",
-        "critical": "[Context Posture: CRITICAL] Working memory near ceiling. Offload remaining discovery, log forensics, or isolated subtasks to research/self subagents; keep primary reads rg-anchored and suppress verbose CLI output."
+      }
+    },
+    {
+      "match_pattern": "claude",
+      "context_limit": 300000,
+      "thresholds": {
+        "tight": 0.65,
+        "critical": 0.85
       }
     }
   ]
