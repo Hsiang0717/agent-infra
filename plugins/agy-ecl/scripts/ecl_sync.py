@@ -151,7 +151,33 @@ def resolve_symbol_in_file(file_path: Path, symbol: str) -> tuple[int, int, str]
     return (start_line, end_line, anchor_line)
 
 
-def sync_semantics_file(yaml_path: Path, root_dir: Path) -> int:
+def collect_tracked_files(yaml_path: Path) -> set[str]:
+    """Return normalized relative file paths referenced in an ECL YAML file."""
+    tracked: set[str] = set()
+    if not yaml_path.exists():
+        return tracked
+
+    node_pattern = re.compile(
+        r"^\s*(?:-\s*)?(?:id|node|path|file|target|entrypoint|location):\s*([^\s#]+)(?:#L\d+-\d+)?"
+    )
+    with open(yaml_path, "r", encoding="utf-8") as f:
+        for line in f:
+            m = node_pattern.match(line)
+            if not m:
+                continue
+            raw_path = m.group(1).strip().strip("\"'").replace("\\", "/")
+            if "/" in raw_path or raw_path.endswith(
+                (".rs", ".py", ".ts", ".tsx", ".js", ".jsx", ".go", ".java", ".c", ".cpp", ".cs")
+            ):
+                while raw_path.startswith("./"):
+                    raw_path = raw_path[2:]
+                tracked.add(raw_path)
+    return tracked
+
+
+def sync_semantics_file(
+    yaml_path: Path, root_dir: Path, stale_report: list[str] | None = None
+) -> int:
     with open(yaml_path, "r", encoding="utf-8") as f:
         content = f.read()
 
@@ -159,14 +185,24 @@ def sync_semantics_file(yaml_path: Path, root_dir: Path) -> int:
     changed_count = 0
     new_lines = []
 
+    cluster_pattern = re.compile(
+        r"^\s*-\s*(?:cluster_id|id|cluster|name):\s*([^\s#]+)"
+    )
     node_pattern = re.compile(
         r"^(\s*(?:-\s*)?(?:id|node|path|file|target|entrypoint|location):\s*)([^\s#]+)#L(\d+)-(\d+)(.*)$"
     )
     symbol_pattern = re.compile(r"^\s*(?:symbol|fn|func|struct|class|name):\s*(\w+)")
 
+    cur_cluster = "unknown"
     i = 0
     while i < len(lines):
         line = lines[i]
+        indent = len(line) - len(line.lstrip())
+        if indent <= 4:
+            m_cluster = cluster_pattern.match(line)
+            if m_cluster:
+                cur_cluster = m_cluster.group(1).strip().strip("\"'")
+
         m_node = node_pattern.match(line)
         if m_node:
             prefix = m_node.group(1)
@@ -182,8 +218,13 @@ def sync_semantics_file(yaml_path: Path, root_dir: Path) -> int:
                     symbol = m_sym.group(1)
                     break
 
-            if symbol:
-                target_file = root_dir / rel_file
+            target_file = root_dir / rel_file
+            if not target_file.exists():
+                msg = f"[{yaml_path.name}] [STALE: missing file] cluster={cur_cluster} path={rel_file}"
+                print(msg)
+                if stale_report is not None:
+                    stale_report.append(msg)
+            elif symbol:
                 res = resolve_symbol_in_file(target_file, symbol)
                 if res:
                     new_start, new_end, _new_anchor = res
@@ -193,6 +234,11 @@ def sync_semantics_file(yaml_path: Path, root_dir: Path) -> int:
                         print(
                             f"[{yaml_path.name}] Updated {symbol} ({rel_file}): #L{cur_start}-{cur_end} -> #L{new_start}-{new_end}"
                         )
+                else:
+                    msg = f"[{yaml_path.name}] [STALE: missing symbol] cluster={cur_cluster} symbol={symbol} path={rel_file}"
+                    print(msg)
+                    if stale_report is not None:
+                        stale_report.append(msg)
 
         new_lines.append(line)
         i += 1
@@ -216,10 +262,11 @@ def main():
 
     root_dir = Path(args.root).resolve()
     total_synced = 0
+    stale_entries: list[str] = []
 
     single_ecl = root_dir / ".agent" / "ecl.yaml"
     if single_ecl.exists():
-        total_synced += sync_semantics_file(single_ecl, root_dir)
+        total_synced += sync_semantics_file(single_ecl, root_dir, stale_entries)
 
     sem_dir = (
         Path(args.semantics_dir).resolve()
@@ -230,9 +277,13 @@ def main():
         for yml in sem_dir.glob("*.yaml"):
             if yml.name == "INDEX.yaml":
                 continue
-            total_synced += sync_semantics_file(yml, root_dir)
+            total_synced += sync_semantics_file(yml, root_dir, stale_entries)
 
     print(f"ECL Sync complete. Total coordinates updated: {total_synced}")
+    if stale_entries:
+        print(
+            f"[ECL STALE] Detected {len(stale_entries)} broken reference(s) — update or prune .agent/ecl.yaml."
+        )
 
 
 if __name__ == "__main__":
