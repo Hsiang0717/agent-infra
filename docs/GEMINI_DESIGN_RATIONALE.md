@@ -81,6 +81,13 @@ Antigravity (AGY) 是定位於 **Staff Software Engineer（資深主任軟體工
   3. **假說證偽與編排經濟學**：將 `2-Strike` 明確定義為「證偽因果心理模型（Falsification）」，並補上 `Direct` vs. `invoke_subagent` vs. `swarm` 的最小編排開銷準則。
   4. **模型感知 Posture（`model_profiles`）**：啟用 `agy-enhancer` `HookInput.modelName` 比對，針對 Hydrogen 提供較寬鬆的注意力預算（`300k` / `0.65` / `0.88`）並移除催促提前收斂的字眼，同時保留零噪音與 Context Firewall。
 
+### 9. 「agy cli v1.5+ 原生編排、執行模式與 Hook 生命週期對齊」(CLI v1.5 Alignment)
+- **歷史教訓**：隨著 `agy cli` 演進至 `v1.5.16`，平台原生引入了 Dynamic Workflows (`run_workflow`)、`plan` / `auto`（含 OS Terminal Sandbox）執行模式、`/goal`・`/boost`・`/teamwork`・`/browser`・`/learn` 指令、即時進度清單 (`update_steps`)、`SessionStart` Hook 與 `systemMessage` 注入格式，並於 `v1.5.13` 禁止 Agent 未經 `/swarm` 自行啟動 swarm。若 AAEP 與 `agy-enhancer` 停留在舊世代假設，將造成四類磨擦：(1) AAEP 鼓勵自主呼叫 `swarm` 與 CLI 護欄衝突且漏用 `run_workflow`；(2) `agy-enhancer` 僅有 `hydrogen` profile，導致 Neon/Carbon/Orchestrator 過早退回 `200k` 閾值；(3) 繼續使用已棄用的 `ephemeralMessage` 且於 `PreInvocation` 重複檢查記憶雷達，長對話跨越 64KB 視窗即重複刷屏；(4) `CLI_TOOLCHAIN.md` 未區分本機 Windows 與 `--remote-agent` Linux 環境。
+- **演進決策**：
+  1. **三級自主編排＋使用者模式邊界**：自主編排收斂為 `Direct` ➔ `invoke_subagent` ➔ `run_workflow`（可程式化扇出 / Pipeline / Schema 聚合），並明文排除未授權啟動 `/swarm`（不重複抄寫 CLI 內建之斜線指令說明與 `update_steps` 工具教學，維持減法純粹）。
+  2. **交界契約精準對齊**：僅針對 AAEP 與 CLI 新機制的交界處立約——`plan` 模式零寫入邊界、2-Strike 納入 `auto` 終端沙盒與 `/goal` 阻塞舉證、Web UI（`/browser`）vs. 桌面 GUI（`visual-flow`）多模態分工，以及專案短陷阱（`.agents/memory/pitfalls.md`）vs. 跨會話正式規範（`/learn`）分工。
+  3. **Runtime Hook 現代化**：`agy-enhancer` 全面遷移至官方 `systemMessage` 合約（相容新舊 Transcript 去重）、將 `[Project Memory]` 移至 `SessionStart` Hook（搭配 `invocation_num <= 1` 舊配置回退，根除 64KB 重複刷屏），並以頂層共用預設訊息搭配精簡的 `orchestrator` / `neon` / `carbon` / `hydrogen` / `claude` 五組 `model_profiles`。
+
 ---
 
 ## 🧩 三、四大階段生命週期與邊界決策 (The 4-Phase Lifecycle)
