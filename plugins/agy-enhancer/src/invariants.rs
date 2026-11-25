@@ -140,7 +140,11 @@ pub fn probe_recent_read_invariants_with_template(path: &Path, template: &str) -
         if let Ok(line_str) = std::str::from_utf8(line) {
             if let Ok(step) = serde_json::from_str::<TranscriptStep>(line_str.trim()) {
                 let st = step.step_type.as_deref().unwrap_or("");
-                if st == "EPHEMERAL_MESSAGE" || st == "SYSTEM_SDK" || st == "TOOL_CALL" {
+                if st == "EPHEMERAL_MESSAGE"
+                    || st == "SYSTEM_MESSAGE"
+                    || st == "SYSTEM_SDK"
+                    || st == "TOOL_CALL"
+                {
                     continue;
                 }
 
@@ -171,7 +175,32 @@ pub fn probe_recent_read_invariants_with_template(path: &Path, template: &str) -
     }
 }
 
-/// Checks whether a recent `EPHEMERAL_MESSAGE` in the last 64KB chunk already contains `marker`.
+/// Extracts text from an injected step's `content` field across both legacy string
+/// (`EPHEMERAL_MESSAGE`) and structured (`SYSTEM_MESSAGE`) transcript representations.
+fn extract_step_text(content: Option<&serde_json::Value>) -> Option<String> {
+    let val = content?;
+    match val {
+        serde_json::Value::String(s) => Some(s.clone()),
+        serde_json::Value::Object(map) => {
+            if let Some(inner) = map.get("systemMessage") {
+                if let Some(s) = inner.as_str() {
+                    return Some(s.to_string());
+                }
+                if let Some(nested) = inner.get("systemMessage").and_then(|v| v.as_str()) {
+                    return Some(nested.to_string());
+                }
+            }
+            if let Some(s) = map.get("text").and_then(|v| v.as_str()) {
+                return Some(s.to_string());
+            }
+            serde_json::to_string(val).ok()
+        }
+        _ => None,
+    }
+}
+
+/// Checks whether a recent injected message (`EPHEMERAL_MESSAGE` or `SYSTEM_MESSAGE`)
+/// in the last 64KB chunk already contains `marker`.
 /// If `max_planner_turns` is `Some(n)`, stops scanning once `n` `PLANNER_RESPONSE` steps have been passed.
 pub fn has_recent_ephemeral_marker(path: &Path, marker: &str, max_planner_turns: Option<usize>) -> bool {
     let mut file = match File::open(path) {
@@ -218,9 +247,9 @@ pub fn has_recent_ephemeral_marker(path: &Path, marker: &str, max_planner_turns:
                             return false;
                         }
                     }
-                } else if st == "EPHEMERAL_MESSAGE" {
-                    if let Some(serde_json::Value::String(ref s)) = step.content {
-                        if s.contains(marker) {
+                } else if st == "EPHEMERAL_MESSAGE" || st == "SYSTEM_MESSAGE" {
+                    if let Some(text) = extract_step_text(step.content.as_ref()) {
+                        if text.contains(marker) {
                             return true;
                         }
                     }

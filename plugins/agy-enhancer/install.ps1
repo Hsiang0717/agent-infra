@@ -74,11 +74,46 @@ if ($Global) {
             try {
                 $srcObj = Get-Content -LiteralPath $srcConfig -Raw -Encoding UTF8 | ConvertFrom-Json
                 $dstObj = Get-Content -LiteralPath $globalConfig -Raw -Encoding UTF8 | ConvertFrom-Json
-                $hasProfiles = ($null -ne $dstObj.PSObject.Properties['model_profiles']) -and ($dstObj.model_profiles.Count -gt 0)
-                if ((-not $hasProfiles) -and ($null -ne $srcObj.PSObject.Properties['model_profiles']) -and ($srcObj.model_profiles.Count -gt 0)) {
-                    $dstObj | Add-Member -NotePropertyName 'model_profiles' -NotePropertyValue $srcObj.model_profiles -Force
-                    $dstObj | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $globalConfig -Encoding UTF8
-                    Write-Host "[Global] Merged default model_profiles into existing config: $globalConfig" -ForegroundColor Cyan
+                $srcProfiles = @()
+                if ($null -ne $srcObj.PSObject.Properties['model_profiles'] -and $null -ne $srcObj.model_profiles) {
+                    $srcProfiles = @($srcObj.model_profiles)
+                }
+                if ($srcProfiles.Count -gt 0) {
+                    $dstProfiles = @()
+                    if ($null -ne $dstObj.PSObject.Properties['model_profiles'] -and $null -ne $dstObj.model_profiles) {
+                        $dstProfiles = @($dstObj.model_profiles)
+                    }
+                    $existingByPattern = @{}
+                    foreach ($p in $dstProfiles) {
+                        if ($p.match_pattern) {
+                            $existingByPattern[$p.match_pattern.ToString().Trim().ToLowerInvariant()] = $p
+                        }
+                    }
+                    $mergedProfiles = @()
+                    $added = @()
+                    $handled = @{}
+                    foreach ($sp in $srcProfiles) {
+                        $key = $sp.match_pattern.ToString().Trim().ToLowerInvariant()
+                        $handled[$key] = $true
+                        if ($existingByPattern.ContainsKey($key)) {
+                            $mergedProfiles += $existingByPattern[$key]
+                        }
+                        else {
+                            $mergedProfiles += $sp
+                            $added += $sp.match_pattern.ToString()
+                        }
+                    }
+                    foreach ($dp in $dstProfiles) {
+                        $key = if ($dp.match_pattern) { $dp.match_pattern.ToString().Trim().ToLowerInvariant() } else { '' }
+                        if (-not $handled.ContainsKey($key)) {
+                            $mergedProfiles += $dp
+                        }
+                    }
+                    if ($added.Count -gt 0) {
+                        $dstObj | Add-Member -NotePropertyName 'model_profiles' -NotePropertyValue $mergedProfiles -Force
+                        $dstObj | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $globalConfig -Encoding UTF8
+                        Write-Host "[Global] Merged new model_profiles ($($added -join ', ')) into existing config: $globalConfig" -ForegroundColor Cyan
+                    }
                 }
             }
             catch {

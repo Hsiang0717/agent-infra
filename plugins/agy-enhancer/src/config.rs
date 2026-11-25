@@ -231,11 +231,11 @@ fn default_nominal_message() -> String {
 }
 
 fn default_tight_message() -> String {
-    "[Context Posture: TIGHT] Avoid blind full-file dumps (use outline/rg; offload broad cross-file audits to research subagent). If a fix failed or spans modules, do NOT repeat local tweaks—trace paired channels & align Where/Who/When first.".to_string()
+    "[Context Posture: TIGHT] Protect working memory: use outline/rg slices, delegate broad audits to research subagent or run_workflow, and trace causal chains rather than repeating local edits.".to_string()
 }
 
 fn default_critical_message() -> String {
-    "[Context Posture: CRITICAL] Working memory near ceiling. Offload remaining discovery, log forensics, or isolated subtasks to research/self subagents; keep primary reads strictly rg-anchored, suppress verbose CLI output, and converge directly on verified completion.".to_string()
+    "[Context Posture: CRITICAL] Working memory near ceiling. Offload remaining discovery, log forensics, or bulk fan-out to research/self subagents or run_workflow; keep primary reads rg-anchored and suppress verbose CLI output.".to_string()
 }
 
 // ─── Config Discovery & Loading ─────────────────────────────────────────────

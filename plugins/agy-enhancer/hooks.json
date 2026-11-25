@@ -1,5 +1,12 @@
 {
   "agy-enhancer": {
+    "SessionStart": [
+      {
+        "type": "command",
+        "command": "bin\\agy-enhancer.exe --session-start",
+        "timeout": 5
+      }
+    ],
     "PreInvocation": [
       {
         "type": "command",
